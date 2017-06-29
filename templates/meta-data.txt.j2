@@ -1,0 +1,17 @@
+---
+# YAML formatierte instance parameter für cloud-init
+# meta-data.txt via
+
+instance-id: {{ inventory_hostname }}
+# local-hostname bitte als fqdn:
+local-hostname: {{ inventory_hostname }}
+# ipv4 network settings for static ip
+# doesnt work well with changin NIC names...
+#network-interfaces: |
+#  iface {{ ifacename }} inet static
+#  address {{ ipv4 }}
+#  network 192.168.1.0
+#  netmask 255.255.255.0
+#  broadcast 192.168.1.255
+#  gateway 192.168.1.254
+#  onboot yes

@@ -1,0 +1,305 @@
+---
+# Prerequisites:
+# $ pip install Pysphere
+# mkisofs / on Mac via brew install cdrtools
+# ofvtool from vmware (this is a free tool)
+
+# preparations for host to be provisioned happen on local machine - das ist im Prinzip alles!
+- block:
+  - name: create temp folder for staging of setup of vm images
+    file:
+      path: "{{ vmproim_tempfolder }}"
+      state: directory
+      mode: 0755
+
+  #- name: info temp folder will be deleted after run
+  - debug: msg="info temp folder will be deleted after run"
+    when: delete_temp_folder == "yes"
+    changed_when: true
+    notify:
+      - delete temp folder
+
+  - name: download hdd image file for vm (can take very long!)
+    get_url:
+      url: "{{ vmproim_imagesource }}"
+      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+      checksum: "sha256:{{ vmproim_img_sha256 }}"
+    when: vmproim_imagesource | match("^(http|ftp)s?.*")
+
+  - name: copy hdd image for vm from given path
+    src: "{{ vmproim_imagesource }}"
+    dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+    when: vmproim_imagesource | match("^\/.*\/?.*")
+
+  - stat:
+    path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+    checksum_algorithm: sha256
+    register: vmproim_img_filename_stat
+    when: vmproim_imagesource | match("^\/.*\/?.*")
+
+  - name: fail if checksum of copied image from path does not match
+    fail:
+      msg: "Checksum of the copied image source file differs from the requested checksum!"
+    when:
+      - vmproim_img_sha256 != vmproim_img_filename_stat.checksum
+      - vmproim_imagesource | match("^\/.*\/?.*")
+
+  - name: convert to vmdk (if neccessary)
+    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_img_filename }} {{ vmproim_vmdk }}"
+    args:
+      chdir: "{{ vmproim_tempfolder }}"
+      creates: "{{ vmproim_vmdk }}"
+
+  - name: copy generic ovf template to local staging directory
+    template:
+      src: ovf-template.ovf.j2
+      dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
+
+  - name: convert image for vmware with ofvtool
+    shell: >
+      ovftool
+      --acceptAllEulas
+      --noSSLVerify
+      --skipManifestCheck
+      --diskMode=thin
+      "preconverted_{{ ofvtemplate_name }}"
+      "{{ ofvtemplate_name }}"
+    args:
+     chdir: "{{ vmproim_tempfolder }}"
+     creates: "{{ ofvtemplate_name }}"
+
+  - name: create cloud init folder
+    file:
+      path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}"
+      state: directory
+      mode: 0755
+
+  - name: read this users ssh public key for cloud-init
+    shell: cat ~/.ssh/id_rsa.pub
+    register: user_ssh_public_key
+
+  - name: read this users username (running the deploy)
+    local_action: command whoami
+    register: username_on_the_ansible_host
+
+  - name: copy cloud-init user-data template for vm
+    template:
+      src: user-data.txt.j2
+      dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/user-data"
+    register: userdata_task
+
+  - name: copy cloud-init meta-data template for vm
+    template:
+      src: meta-data.txt.j2
+      dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/meta-data"
+    register: metadata_task
+
+  # userdata via cloud-config openstack - funktioniert leider nicht in der vm.
+  #- file:
+  #    path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest"
+  #    state: directory
+  #    recurse: yes
+  #- name: copy cloud-init userdata openstack template for vm
+  #  template:
+  #    src: user-data.txt.j2
+  #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
+
+  - name: create cd image for cloud-init (with mkisofs)
+    #shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
+    # auskommentiert: -V user-data // -V cidata
+    shell: "mkisofs -output {{ cloudinit_iso }} -r -V cidata {{ inventory_hostname }}/"
+    args:
+      chdir: "{{ vmproim_tempfolder }}"
+      #creates: "{{ cloudinit_iso }}"
+    #when: metadata_task.changed or userdata_task.changed
+    #ansible_os_family == 'Darwin'
+
+
+  # run this whole block via:
+  delegate_to: localhost
+  tags:
+    - prepare
+
+- block:
+# use --overwrite option if you want to overwrite the vm on the host,
+#       else it fails if the host already exists
+  - name: transfer vm to host using VMWare ovftool
+    shell: >
+      ovftool
+      --acceptAllEulas
+      --noSSLVerify
+      --skipManifestCheck
+      --X:logFile={{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log
+      --diskMode=thin
+      -n={{ inventory_hostname }}
+      "--datastore={{ datastore }}"
+      "--network={{ vmproim_network }}"
+      "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
+      "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
+    register: deploy_ovf_result
+  #  serial: 1
+    #ignore_errors: True
+
+  - name: copy cloud-init iso to hosting machine
+    vsphere_copy:
+      host: "{{ vcenter_hostname }}"
+      login: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      src: "{{ vmproim_tempfolder }}{{ cloudinit_iso }}"
+      datacenter: "{{ datacenter }}"
+      datastore: "{{ datastore }}"
+      path: "/{{ inventory_hostname }}/{{ cloudinit_iso }}"
+      validate_certs: no
+    #transport: local
+
+  - name: reconfigure VM on vSphere
+    vsphere_guest:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: no
+      guest: "{{ inventory_hostname }}"
+      # state: present
+      state: reconfigured
+      vm_extra_config:
+        notes: "{{ vmproim_notes }}"
+    #  vm_disk:
+    #    disk1:
+    #      size_gb: "{{ disk }}"
+    #      type: thin
+    #      datastore: "{{ datastore }}"
+      vm_nic:
+        nic1:
+          type: vmxnet3
+          network: "{{ vmproim_network }}"
+          network_type: standard
+      vm_hardware:
+        memory_mb: "{{ memory }}"
+        num_cpus: "{{ cpucount }}"
+        osid: "{{ osid }}"
+        scsi: paravirtual
+        vm_cdrom:
+          type: "iso"
+          iso_path: "{{ datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
+          state: connected
+      esxi:
+        datacenter: "{{ datacenter }}"
+        hostname: "{{ esxi_host }}"
+    tags:
+      - reconfigure
+
+  - name: power on vm on vSphere
+    vsphere_guest:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: no
+      guest: "{{ inventory_hostname }}"
+      # state: present
+      state: powered_on
+      esxi:
+        datacenter: "{{ datacenter }}"
+        hostname: "{{ esxi_host }}"
+
+  - name: Wait for the post-install SSH to become available
+    wait_for:
+      host: '{{ inventory_hostname }}'
+      port: 22
+      state: started
+      timeout: 300
+      delay: 10
+
+  - name: wait for the vm to work init...
+    pause:
+      seconds: 30
+
+  - name: Wait for the host to become unavailable = finished init
+    wait_for:
+      host: '{{ inventory_hostname }}'
+      port: 22
+      state: stopped
+      timeout: 300
+      delay: 10
+
+
+  #- name: shutdown host for detaching cd image
+  #  shell: "sleep 3; sudo shutdown -h now"
+  #  become: yes
+  #  delegate_to: "{{ inventory_hostname }}"
+  #  # dieser Task schlägt fehl (unreachable), weil der host danach nicht mehr erreichbar ist.
+  #  ignore_errors: True
+
+  # warten, falls der host einige Zeit zum herunterfahren benötigt
+  - pause:
+      seconds: 10
+
+  - name: reconfigure VM on vSphere - detach cd image
+    vsphere_guest:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: no
+      guest: "{{ inventory_hostname }}"
+      # state: present
+      state: reconfigured
+      vm_hardware:
+        vm_cdrom:
+          type: "iso"
+          iso_path: "{{ datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
+          state: disconnected
+      esxi:
+        datacenter: "{{ datacenter }}"
+        hostname: "{{ esxi_host }}"
+    tags:
+      - reconfigure
+
+  - name: power on vm on vSphere
+    vsphere_guest:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: no
+      guest: "{{ inventory_hostname }}"
+      # state: present
+      state: powered_on
+      esxi:
+        datacenter: "{{ datacenter }}"
+        hostname: "{{ esxi_host }}"
+
+  - name: Wait for the post-reboot SSH to become available
+    wait_for:
+      host: '{{ inventory_hostname }}'
+      port: 22
+      state: started
+      timeout: 300
+      delay: 10
+
+  # via https://github.com/ansible-provisioning/ansible-provisioning/blob/master/README.md
+    ### Revoke any existing host keys for this server (should become a separate ansible module to avoid conflicts)
+  - name: Revoke any existing host keys for this server by hostname
+    command: ssh-keygen -R {{ inventory_hostname_short }}
+
+  # herausfinden der IP zum entfernen dieser aus den know_hosts
+  - command: "dig +short {{ inventory_hostname }}"
+    changed_when: false
+    register: dig_output
+
+  - set_fact:
+      looked_up_ips: "{{ dig_output.stdout_lines }}"
+
+  - debug: msg="found ip {{ item }}"
+    with_items: looked_up_ips
+
+  - name: Revoke any existing host keys for this server by ip address
+    command: "ssh-keygen -R {{ item }}"
+    with_items: "{{ looked_up_ips }}"
+
+  # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
+  - name: ensure the newly created host is an ssh known host (unsecure for MITM!!)
+    known_hosts:
+      #path: /etc/ssh/ssh_known_hosts
+      name: "{{ inventory_hostname }}"
+      key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ inventory_hostname }}') }}"
+
+  # run this whole block via:
+  delegate_to: localhost

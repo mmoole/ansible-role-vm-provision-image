@@ -1,0 +1,150 @@
+#!/bin/bash
+
+## TODO
+# - if then für statische/dynamische IP
+
+{{ ansible_managed }}
+# this script runs as part of cloud-init setup on first boot of the instance
+# docs:
+# https://cloudinit.readthedocs.io/en/latest
+# ...
+# https://cloudinit.readthedocs.io/en/latest/topics/dir_layout.html
+# https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html
+
+
+echo "cloud-init script for host '{{ inventory_hostname }}' userdata is now running on hostname: $(uname -n) ..."
+
+# folgende Operationen als root durchführen (ist eigentlich sowieso der Fall, nur um sicher zu sein)
+su - root
+
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# Achtung: außer zu Testzwecken niemals ssh login nur mit passwort zulassen! !
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+# ex: user admin mit password 12345
+# perl -e 'print crypt("passwordhere", "salt"),"\n"'
+
+# user ohne passwort hinzufügen:
+# useradd -m admin
+
+# testumgebung: user 'admin' mit passwort:
+# useradd -m -p sajEeYaHYyeSU admin
+# mkdir /home/admin/.ssh
+# echo 'admin  ALL=(ALL:ALL) ALL' >> /etc/sudoers
+# echo "{{ user_ssh_public_key.stdout }}" >> /home/admin/.ssh/id_rsa.pub
+# echo "{{ user_ssh_public_key.stdout }}" >> /home/admin/.ssh/authorized_keys
+
+
+# beispiel: public SSH Key für ROOT user rüberkopieren
+# echo "{{ user_ssh_public_key.stdout }}" >> ~/.ssh/id_rsa.pub
+
+# ansible user hinzufügen: // zum Test auch mit password
+#useradd -m {{ username_on_the_ansible_host.stdout }}
+useradd -m -p sajEeYaHYyeSU {{ username_on_the_ansible_host.stdout }}
+mkdir /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
+echo "{{ user_ssh_public_key.stdout }}" >> /home/{{ username_on_the_ansible_host.stdout }}/.ssh/id_rsa.pub
+echo "{{ user_ssh_public_key.stdout }}" >> /home/{{ username_on_the_ansible_host.stdout }}/.ssh/authorized_keys
+
+chown -R {{ username_on_the_ansible_host.stdout }}:{{ username_on_the_ansible_host.stdout }} /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
+chmod 0600 -r /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
+restorecon -Rv /home/{{ username_on_the_ansible_host.stdout }}/.ssh
+# set this user to the sudoers
+echo '{{ username_on_the_ansible_host.stdout }}  ALL=(ALL:ALL) ALL' >> /etc/sudoers
+
+# #############################################################################
+
+# deutsches keyboard einstellen - nützlich für direkte Verbindung
+# localectl set-keymap de
+
+# Zeitzone UTC einstellen (ist eigentlich schon)
+timedatectl set-timezone UTC
+
+## ex: DHCP client ad-hoc ausführen um Netzwerk zu 'bekommen'
+# dhclient -v
+# ggf workaround, damit dies zu start ausgeführt wird:
+# echo "#!/bin/bash
+# # Solution for "No Internet Connection from VMware"
+# #
+# ### BEGIN INIT INFO
+# # Default-Start: 2 3 4 5
+# # Default-Stop: 0 1 6
+# ### END INIT INFO
+# dhclient -v" >> /etc/init.d/net-autostart
+
+## warten
+sleep 3
+
+# Show network interfaces:
+# $ ip link show
+# read link name to variable and use this along...
+# via https://www.centos.org/forums/viewtopic.php?t=47083#p228136
+interf="$(ip ntable | grep dev | sort | uniq | sed -e 's/^.*dev //;/^lo/d')"
+
+# set via ansible preparation: true/false
+usedhcp={{ vmproim_usedhcp }}
+
+# set disclaimer for automatically generated files
+ansible_notice="added by user-data init script via cloud-init on $(date -u) via Ansible"
+
+if [ "$usedhcp" = true or $usedhcp = "yes" ] ; then
+  ## ipv4 network settings for dynamic ip / DHCP  ##############################
+  touch /etc/sysconfig/network-scripts/ifcfg-$interf
+  echo "# $ansible_notice
+  DEVICE=$interf
+  BOOTPROTO=dhcp
+  ONBOOT=yes
+  TYPE=Ethernet
+  USERCTL=yes
+  PEERDNS=yes
+  IPV6INIT=no
+  PERSISTENT_DHCLIENT=1
+  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
+
+  echo "# $ansible_notice
+  HOSTNAME={{ inventory_hostname }}
+  # end via {{ ansible_managed }}
+  " >> /etc/sysconfig/network
+
+  # info: statische IP mit DHCP : / via https://ubuntuforums.org/showthread.php?t=785047
+  # /etc/dhcp3/dhclient.conf:
+  # alias {
+  #  interface "eth0";
+  #  fixed-address 192.168.1.5;
+  # }
+
+else
+  ## ipv4 network settings for static ip #######################################
+  echo "# $ansible_notice
+  DEVICE=$interf
+  BOOTPROTO=static
+  DHCP_HOSTNAME={{ inventory_hostname }}
+  NETWORK={{ ip_network }}
+  NETMASK={{ ip_netmask }}
+  IPADDR={{ ipv4 }}
+  # deprecated:
+  # BRADCAST={{ ip_broadcast }}
+  GATEWAY={{ ip_gateway }}
+  ONBOOT=yes
+  TYPE=Ethernet
+  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
+
+  echo "# $ansible_notice
+  HOSTNAME={{ inventory_hostname }}
+  GATEWAY={{ ip_gateway }}
+  DNS1={{ ip_gateway }}
+  DNS2=8.8.8.8
+  # end via {{ ansible_managed }}
+  " >> /etc/sysconfig/network
+fi
+
+
+# Datei schreiben zum Schluss, die zur verifizierung dienen könnte...
+echo "$(date -u)" >> /tmp/fin_cloudinit.txt
+
+sleep 10
+
+# herunterfahren zum beenden / entfernen des CD images
+shutdown now
+
+# eigentlich unnötig:
+exit 0

@@ -1,0 +1,48 @@
+---
+# This directory contains defaults for variables used in roles
+
+# Default datacenter variable to ha-datacenter for ESXi
+vmproim_datacenter: 'ha-datacenter'
+
+# Default Network name for vm's network
+vmproim_network: 'VMnetwork'
+
+# Default ipv4 for host
+#vmproim_ipv4host: 10.0.0.2
+
+# set dynamic ip via dhcp for first nic to 'true' or 'false' to use static ip
+vmproim_usedhcp: true
+
+# static ip (if used)
+ipv4: ''
+
+#Default notes for the virtual machine
+vmproim_notes: 'Created by Ansible'
+
+# folder on the local machine for temporary files - with trailing /
+# example on mac: {{ lookup('env','TMPDIR') }}/{{role_path|basename}}
+# example on linux: "/var/tmp/{{role_path|basename}}/"
+#tempfolder: "{{ lookup('env','TMPDIR') }}/{{role_path|basename}}/"
+vmproim_tempfolder: |
+  "{% if ansible_os_family == 'Darwin' %}
+    '{{ lookup('env','TMPDIR') }}/{{role_path|basename}}/'
+  {% else %}
+    '/var/tmp/{{role_path|basename}}/'
+  {% endif %}"
+
+cloudinit_iso: "{{ inventory_hostname }}.iso"
+
+# image to download and provision - complete path with filename - or local path with filename
+# this local path must be accessible from the machine that ansible runs on!
+vmproim_imagesource: 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1612.qcow2'
+# other variant:
+#vmproim_imagesource: '/tmp/CentOS-7-x86_64-GenericCloud-1612.qcow2'
+vmproim_img_sha256: '559bebb4abb2fdf3bd88c917cc11efb1975bfe4494e666d133a3148ec4e6225d'
+
+#vmdk_url_file: 'sha256sum.txt'
+#vmdk_sha256: '2dc19161f30224889f685342fc7e6dd68ff2934c20c0f828f79fe797cffa3b3a'
+
+vmproim_img_filename: "{{ vmproim_imagesource | regex_replace('(.*)\/(.+)$', '\\2') }}"
+vmproim_vmdk: "{{ vmproim_img_filename | regex_replace('(^.*)\\.(.+)$', '\\1') }}.vmdk"
+
+ofvtemplate_name: vm_provision_template.ovf

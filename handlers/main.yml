@@ -1,0 +1,9 @@
+# handlers for this role
+
+
+## should be run at the very end after all plays were completed
+- name: delete temp folder
+  file:
+    path: "{{ tempfolder }}"
+    state: absent
+  delegate_to: localhost
