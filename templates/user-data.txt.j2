@@ -1,9 +1,7 @@
 #!/bin/bash
 
-## TODO
-# - if then für statische/dynamische IP
+#  {{ ansible_managed }}
 
-{{ ansible_managed }}
 # this script runs as part of cloud-init setup on first boot of the instance
 # docs:
 # https://cloudinit.readthedocs.io/en/latest
@@ -11,6 +9,8 @@
 # https://cloudinit.readthedocs.io/en/latest/topics/dir_layout.html
 # https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html
 
+# set disclaimer for automatically generated files
+ansible_notice="added by user-data init script via cloud-init on $(date -u) via Ansible"
 
 echo "cloud-init script for host '{{ inventory_hostname }}' userdata is now running on hostname: $(uname -n) ..."
 
@@ -64,15 +64,11 @@ timedatectl set-timezone UTC
 # ggf workaround, damit dies zu start ausgeführt wird:
 # echo "#!/bin/bash
 # # Solution for "No Internet Connection from VMware"
-# #
 # ### BEGIN INIT INFO
 # # Default-Start: 2 3 4 5
 # # Default-Stop: 0 1 6
 # ### END INIT INFO
 # dhclient -v" >> /etc/init.d/net-autostart
-
-## warten
-sleep 3
 
 # Show network interfaces:
 # $ ip link show
@@ -80,13 +76,40 @@ sleep 3
 # via https://www.centos.org/forums/viewtopic.php?t=47083#p228136
 interf="$(ip ntable | grep dev | sort | uniq | sed -e 's/^.*dev //;/^lo/d')"
 
-# set via ansible preparation: true/false
-usedhcp={{ vmproim_usedhcp }}
+# set ipv4 via ansible templating
+ipv4="{{ ipv4 }}"
 
-# set disclaimer for automatically generated files
-ansible_notice="added by user-data init script via cloud-init on $(date -u) via Ansible"
+# if ipv4 contains a valid ipv4 address
+if [[ "$ipv4" =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$ ]] ; then
+  ## ipv4 network settings for static ip #######################################
+  echo "# $ansible_notice
+  DEVICE=$interf
+  BOOTPROTO=static
+  DHCP_HOSTNAME={{ inventory_hostname }}
+  NETWORK={{ ip_network }}
+  NETMASK={{ ip_netmask }}
+  IPADDR={{ ipv4 }}
+  # deprecated:
+  # BRADCAST=ip_broadcast
+  GATEWAY={{ ip_gateway }}
+  ONBOOT=yes
+  TYPE=Ethernet
+  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
 
-if [ "$usedhcp" = true or $usedhcp = "yes" ] ; then
+  echo "# $ansible_notice
+  HOSTNAME={{ inventory_hostname }}
+  GATEWAY={{ ip_gateway }}
+  DNS1={{ ip_gateway }}
+  DNS2=8.8.8.8
+  # end via {{ ansible_managed }}
+  " >> /etc/sysconfig/network
+
+  # get network connected
+  ifup $interf
+
+  # info: when using static ip, nsupdate could be used to update a remote nameserver
+
+else
   ## ipv4 network settings for dynamic ip / DHCP  ##############################
   touch /etc/sysconfig/network-scripts/ifcfg-$interf
   echo "# $ansible_notice
@@ -105,43 +128,29 @@ if [ "$usedhcp" = true or $usedhcp = "yes" ] ; then
   # end via {{ ansible_managed }}
   " >> /etc/sysconfig/network
 
+  # get network connected // this seems much too much, but makes it certain to get connected
+  ifup $interf
+  dhclient -v
+  systemctl restart network
+  sleep 20
+  dhclient -v
+  sleep 60
+
   # info: statische IP mit DHCP : / via https://ubuntuforums.org/showthread.php?t=785047
   # /etc/dhcp3/dhclient.conf:
   # alias {
   #  interface "eth0";
   #  fixed-address 192.168.1.5;
   # }
-
-else
-  ## ipv4 network settings for static ip #######################################
-  echo "# $ansible_notice
-  DEVICE=$interf
-  BOOTPROTO=static
-  DHCP_HOSTNAME={{ inventory_hostname }}
-  NETWORK={{ ip_network }}
-  NETMASK={{ ip_netmask }}
-  IPADDR={{ ipv4 }}
-  # deprecated:
-  # BRADCAST={{ ip_broadcast }}
-  GATEWAY={{ ip_gateway }}
-  ONBOOT=yes
-  TYPE=Ethernet
-  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
-
-  echo "# $ansible_notice
-  HOSTNAME={{ inventory_hostname }}
-  GATEWAY={{ ip_gateway }}
-  DNS1={{ ip_gateway }}
-  DNS2=8.8.8.8
-  # end via {{ ansible_managed }}
-  " >> /etc/sysconfig/network
 fi
 
+# restart sshd in order to be visible on port 22 for detection by Ansible
+service sshd restart
+# wait a while in order to be visible
+sleep 30
 
 # Datei schreiben zum Schluss, die zur verifizierung dienen könnte...
 echo "$(date -u)" >> /tmp/fin_cloudinit.txt
-
-sleep 10
 
 # herunterfahren zum beenden / entfernen des CD images
 shutdown now

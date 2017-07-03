@@ -2,11 +2,39 @@
 # Prerequisites:
 # $ pip install Pysphere
 # mkisofs / on Mac via brew install cdrtools
+# qemu-img
 # ofvtool from vmware (this is a free tool)
 
-# preparations for host to be provisioned happen on local machine - das ist im Prinzip alles!
+# preparations for host to be provisioned happen on local machine - das sind im Prinzip alle tasks...!
 - block:
-  - name: create temp folder for staging of setup of vm images
+  - name: get facts from vsphere for guest (ignore failure)
+    vsphere_guest:
+      vcenter_hostname: "{{ vcenter_hostname }}"
+      username: "{{ vcenter_user }}"
+      password: "{{ vcenter_pass }}"
+      validate_certs: no
+      guest: "{{ inventory_hostname }}"
+      vmware_guest_facts: yes
+    register: guestfacts
+    ignore_errors: true
+
+  - name: fail if guest virtual machine already exists
+    fail:
+      msg: "A virtual machine on this host with the name {{ inventory_hostname }} already exists!"
+    when:
+      - guestfacts|succeeded
+      - guestfacts.ansible_facts.hw_instance_uuid | match("^[a-z,0-9]{8}\-.*$")
+
+  - name: Temp default temp folder to "/var/tmp/{{ role_path|basename }}/"
+    set_fact:
+      vmproim_tempfolder: "/var/tmp/{{ role_path|basename }}/"
+
+  - name: Temp folder on MacOS or if TMPDIR variable is found
+    set_fact:
+      vmproim_tempfolder: "{{ lookup('env','TMPDIR') }}/{{ role_path|basename }}/"
+    when: lookup('env','TMPDIR')
+
+  - name: "create temp folder for staging of setup of vm images at {{ vmproim_tempfolder }}"
     file:
       path: "{{ vmproim_tempfolder }}"
       state: directory
@@ -14,7 +42,7 @@
 
   #- name: info temp folder will be deleted after run
   - debug: msg="info temp folder will be deleted after run"
-    when: delete_temp_folder == "yes"
+    when: vmproim_delete_temp_folder == "yes"
     changed_when: true
     notify:
       - delete temp folder
@@ -27,13 +55,14 @@
     when: vmproim_imagesource | match("^(http|ftp)s?.*")
 
   - name: copy hdd image for vm from given path
-    src: "{{ vmproim_imagesource }}"
-    dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+    copy:
+      src: "{{ vmproim_imagesource }}"
+      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
     when: vmproim_imagesource | match("^\/.*\/?.*")
 
   - stat:
-    path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-    checksum_algorithm: sha256
+      path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+      checksum_algorithm: sha256
     register: vmproim_img_filename_stat
     when: vmproim_imagesource | match("^\/.*\/?.*")
 
@@ -41,7 +70,7 @@
     fail:
       msg: "Checksum of the copied image source file differs from the requested checksum!"
     when:
-      - vmproim_img_sha256 != vmproim_img_filename_stat.checksum
+      - vmproim_img_sha256 != vmproim_img_filename_stat.stat.checksum
       - vmproim_imagesource | match("^\/.*\/?.*")
 
   - name: convert to vmdk (if neccessary)
@@ -49,11 +78,13 @@
     args:
       chdir: "{{ vmproim_tempfolder }}"
       creates: "{{ vmproim_vmdk }}"
+    register: convertvmdk
 
   - name: copy generic ovf template to local staging directory
     template:
       src: ovf-template.ovf.j2
       dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
+    register: ofvtemplate
 
   - name: convert image for vmware with ofvtool
     shell: >
@@ -62,11 +93,12 @@
       --noSSLVerify
       --skipManifestCheck
       --diskMode=thin
+      --overwrite
       "preconverted_{{ ofvtemplate_name }}"
       "{{ ofvtemplate_name }}"
     args:
      chdir: "{{ vmproim_tempfolder }}"
-     creates: "{{ ofvtemplate_name }}"
+    when: ofvtemplate.changed or convertvmdk.changed
 
   - name: create cloud init folder
     file:
@@ -105,11 +137,11 @@
   #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
 
   - name: create cd image for cloud-init (with mkisofs)
-    #shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
-    # auskommentiert: -V user-data // -V cidata
     shell: "mkisofs -output {{ cloudinit_iso }} -r -V cidata {{ inventory_hostname }}/"
     args:
       chdir: "{{ vmproim_tempfolder }}"
+    #shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
+    # auskommentiert: -V user-data // -V cidata
       #creates: "{{ cloudinit_iso }}"
     #when: metadata_task.changed or userdata_task.changed
     #ansible_os_family == 'Darwin'
@@ -121,24 +153,23 @@
     - prepare
 
 - block:
-# use --overwrite option if you want to overwrite the vm on the host,
-#       else it fails if the host already exists
   - name: transfer vm to host using VMWare ovftool
     shell: >
       ovftool
       --acceptAllEulas
       --noSSLVerify
       --skipManifestCheck
-      --X:logFile={{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log
+      --X:logFile="{{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log"
       --diskMode=thin
-      -n={{ inventory_hostname }}
-      "--datastore={{ datastore }}"
-      "--network={{ vmproim_network }}"
+      --diskSize:template2,11="{{ disk * 1024 * 1024 }}"
+      --name="{{ inventory_hostname }}"
+      --datastore="{{ vmproim_datastore }}"
+      --network="{{ vmproim_network }}"
       "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
       "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
     register: deploy_ovf_result
-  #  serial: 1
-    #ignore_errors: True
+    # use --overwrite option if you want to overwrite the vm on the host,
+    #       else it fails if the host already exists
 
   - name: copy cloud-init iso to hosting machine
     vsphere_copy:
@@ -146,11 +177,10 @@
       login: "{{ vcenter_user }}"
       password: "{{ vcenter_pass }}"
       src: "{{ vmproim_tempfolder }}{{ cloudinit_iso }}"
-      datacenter: "{{ datacenter }}"
-      datastore: "{{ datastore }}"
+      datacenter: "{{ vmproim_datacenter }}"
+      datastore: "{{ vmproim_datastore }}"
       path: "/{{ inventory_hostname }}/{{ cloudinit_iso }}"
       validate_certs: no
-    #transport: local
 
   - name: reconfigure VM on vSphere
     vsphere_guest:
@@ -159,7 +189,6 @@
       password: "{{ vcenter_pass }}"
       validate_certs: no
       guest: "{{ inventory_hostname }}"
-      # state: present
       state: reconfigured
       vm_extra_config:
         notes: "{{ vmproim_notes }}"
@@ -167,10 +196,10 @@
     #    disk1:
     #      size_gb: "{{ disk }}"
     #      type: thin
-    #      datastore: "{{ datastore }}"
+    #      datastore: "{{ vmproim_datastore }}"
       vm_nic:
         nic1:
-          type: vmxnet3
+          type: "{{ vmproim_nictype }}"
           network: "{{ vmproim_network }}"
           network_type: standard
       vm_hardware:
@@ -180,13 +209,11 @@
         scsi: paravirtual
         vm_cdrom:
           type: "iso"
-          iso_path: "{{ datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
+          iso_path: "{{ vmproim_datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
           state: connected
       esxi:
-        datacenter: "{{ datacenter }}"
-        hostname: "{{ esxi_host }}"
-    tags:
-      - reconfigure
+        datacenter: "{{ vmproim_datacenter }}"
+        hostname: "{{ vcenter_esxi }}"
 
   - name: power on vm on vSphere
     vsphere_guest:
@@ -195,19 +222,27 @@
       password: "{{ vcenter_pass }}"
       validate_certs: no
       guest: "{{ inventory_hostname }}"
-      # state: present
       state: powered_on
       esxi:
-        datacenter: "{{ datacenter }}"
-        hostname: "{{ esxi_host }}"
+        datacenter: "{{ vmproim_datacenter }}"
+        hostname: "{{ vcenter_esxi }}"
 
-  - name: Wait for the post-install SSH to become available
+  # run this whole block via:
+  delegate_to: localhost
+  tags:
+    - provision
+
+- block:
+  - name: set ip or hostname to ping
+    set_fact:
+      ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ inventory_hostname }}{% endif %}"
+
+  - name: "Wait for the post-install SSH to become available at {{ ping_hostname }}"
     wait_for:
-      host: '{{ inventory_hostname }}'
+      host: '{{ ping_hostname }}'
       port: 22
       state: started
       timeout: 300
-      delay: 10
 
   - name: wait for the vm to work init...
     pause:
@@ -215,19 +250,10 @@
 
   - name: Wait for the host to become unavailable = finished init
     wait_for:
-      host: '{{ inventory_hostname }}'
+      host: '{{ ping_hostname }}'
       port: 22
       state: stopped
       timeout: 300
-      delay: 10
-
-
-  #- name: shutdown host for detaching cd image
-  #  shell: "sleep 3; sudo shutdown -h now"
-  #  become: yes
-  #  delegate_to: "{{ inventory_hostname }}"
-  #  # dieser Task schlägt fehl (unreachable), weil der host danach nicht mehr erreichbar ist.
-  #  ignore_errors: True
 
   # warten, falls der host einige Zeit zum herunterfahren benötigt
   - pause:
@@ -240,18 +266,15 @@
       password: "{{ vcenter_pass }}"
       validate_certs: no
       guest: "{{ inventory_hostname }}"
-      # state: present
       state: reconfigured
       vm_hardware:
         vm_cdrom:
           type: "iso"
-          iso_path: "{{ datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
+          iso_path: "{{ vmproim_datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
           state: disconnected
       esxi:
-        datacenter: "{{ datacenter }}"
-        hostname: "{{ esxi_host }}"
-    tags:
-      - reconfigure
+        datacenter: "{{ vmproim_datacenter }}"
+        hostname: "{{ vcenter_esxi }}"
 
   - name: power on vm on vSphere
     vsphere_guest:
@@ -260,26 +283,27 @@
       password: "{{ vcenter_pass }}"
       validate_certs: no
       guest: "{{ inventory_hostname }}"
-      # state: present
       state: powered_on
       esxi:
-        datacenter: "{{ datacenter }}"
-        hostname: "{{ esxi_host }}"
+        datacenter: "{{ vmproim_datacenter }}"
+        hostname: "{{ vcenter_esxi }}"
 
   - name: Wait for the post-reboot SSH to become available
     wait_for:
-      host: '{{ inventory_hostname }}'
+      host: '{{ ping_hostname }}'
       port: 22
       state: started
       timeout: 300
-      delay: 10
+      delay: 2
+
+  # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
 
   # via https://github.com/ansible-provisioning/ansible-provisioning/blob/master/README.md
-    ### Revoke any existing host keys for this server (should become a separate ansible module to avoid conflicts)
+  ### Revoke any existing host keys for this server (should become a separate ansible module to avoid conflicts)
   - name: Revoke any existing host keys for this server by hostname
     command: ssh-keygen -R {{ inventory_hostname_short }}
 
-  # herausfinden der IP zum entfernen dieser aus den know_hosts
+  # herausfinden der IP zum entfernen dieser aus den known_hosts
   - command: "dig +short {{ inventory_hostname }}"
     changed_when: false
     register: dig_output
@@ -288,18 +312,23 @@
       looked_up_ips: "{{ dig_output.stdout_lines }}"
 
   - debug: msg="found ip {{ item }}"
-    with_items: looked_up_ips
+    with_items:
+      - "{{ looked_up_ips }}"
+      - "{{ ping_hostname }}"
 
   - name: Revoke any existing host keys for this server by ip address
     command: "ssh-keygen -R {{ item }}"
-    with_items: "{{ looked_up_ips }}"
+    with_items:
+      - "{{ looked_up_ips }}"
+      - "{{ ping_hostname }}"
 
-  # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
   - name: ensure the newly created host is an ssh known host (unsecure for MITM!!)
     known_hosts:
       #path: /etc/ssh/ssh_known_hosts
-      name: "{{ inventory_hostname }}"
-      key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ inventory_hostname }}') }}"
+      name: "{{ ping_hostname }}"
+      key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ ping_hostname }}') }}"
 
   # run this whole block via:
   delegate_to: localhost
+  tags:
+    - reconfigure
