@@ -74,7 +74,7 @@
       - vmproim_imagesource | match("^\/.*\/?.*")
 
   - name: convert to vmdk (if neccessary)
-    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_img_filename }} {{ vmproim_vmdk }}"
+    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 -p {{ vmproim_img_filename }} {{ vmproim_vmdk }}"
     args:
       chdir: "{{ vmproim_tempfolder }}"
       creates: "{{ vmproim_vmdk }}"
