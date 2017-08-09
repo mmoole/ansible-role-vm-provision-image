@@ -7,6 +7,15 @@
 
 # preparations for host to be provisioned happen on local machine - das sind im Prinzip alle tasks...!
 - block:
+  - include: "tools.yml"
+
+  - name: Wait for vsphere to be available
+    wait_for:
+      host: '{{ vcenter_hostname }}'
+      port: 80
+      state: started
+      timeout: 10
+
   - name: get facts from vsphere for guest (ignore failure)
     vsphere_guest:
       vcenter_hostname: "{{ vcenter_hostname }}"

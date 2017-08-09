@@ -1,0 +1,29 @@
+---
+
+# check /install required tools for this role
+
+# gather facts for the host it is delegatet to
+- setup:
+
+- name: check pip tools
+  pip: name="{{ item }}"
+  with_items:
+    - pysphere
+
+- name: packages
+  package: name="{{ item }}" state=present
+  with_items:
+    - qemu-img
+  when: ansible_os_family != "Darwin"
+
+- name: packages on mac
+  homebrew: name="{{ item }}" state=present
+  with_items:
+    - qemu
+  when: ansible_os_family == "Darwin"
+
+- name: ovftool needs to be installed
+  shell: ovftool --version
+  register: ovftoolreg
+  failed_when: "'VMware ovftool' not in ovftoolreg.stdout"
+  changed_when: false
