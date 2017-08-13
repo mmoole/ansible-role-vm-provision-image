@@ -117,10 +117,12 @@
 
   - name: read this users ssh public key for cloud-init
     shell: cat ~/.ssh/id_rsa.pub
+    sudo: no
     register: user_ssh_public_key
 
   - name: read this users username (running the deploy)
     local_action: command whoami
+    sudo: no
     register: username_on_the_ansible_host
 
   - name: copy cloud-init user-data template for vm
@@ -339,5 +341,6 @@
 
   # run this whole block via:
   delegate_to: localhost
+  sudo: no
   tags:
     - reconfigure
