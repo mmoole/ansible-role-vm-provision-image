@@ -51,6 +51,8 @@ restorecon -Rv /home/{{ username_on_the_ansible_host.stdout }}/.ssh
 # set this user to the sudoers
 echo '{{ username_on_the_ansible_host.stdout }}  ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
 #echo '{{ username_on_the_ansible_host.stdout }}  ALL=(ALL:ALL) ALL' >> /etc/sudoers
+# add user to the sudoers group
+usermod -aG wheel {{ username_on_the_ansible_host.stdout }}
 
 # #############################################################################
 
