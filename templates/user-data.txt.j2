@@ -1,18 +1,30 @@
 #!/bin/bash
 
 #  {{ ansible_managed }}
-
 # this script runs as part of cloud-init setup on first boot of the instance
-# docs:
 # https://cloudinit.readthedocs.io/en/latest
-# ...
 # https://cloudinit.readthedocs.io/en/latest/topics/dir_layout.html
 # https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html
 
+# ## set variables here only
 # set disclaimer for automatically generated files
 ansible_notice="added by user-data init script via cloud-init on $(date -u) via Ansible"
 
-echo "cloud-init script for host '{{ inventory_hostname }}' userdata is now running on hostname: $(uname -n) ..."
+USERNAME={{ username_on_the_ansible_host.stdout }}
+USER_SSHKEY="{{ user_ssh_public_key.stdout }}"
+
+# use only for static ipv4:
+ipv4="{{ ipv4 }}"
+DHCP_HOSTNAME={{ inventory_hostname }}
+NETWORK={{ ip_network }}
+NETMASK={{ ip_netmask }}
+GATEWAY={{ ip_gateway }}
+HOSTNAME=$DHCP_HOSTNAME
+DNS1={{ ip_gateway }}
+DNS2=8.8.8.8
+# ## dont' set any variables below this line
+
+echo "cloud-init script for host '$HOSTNAME' userdata is now running on hostname: $(uname -n) ..." > /dev/kmsg
 
 # folgende Operationen als root durchführen (ist eigentlich sowieso der Fall, nur um sicher zu sein)
 su - root
@@ -39,20 +51,20 @@ su - root
 # echo "{{ user_ssh_public_key.stdout }}" >> ~/.ssh/id_rsa.pub
 
 # ansible user hinzufügen: // zum Test auch mit password
-#useradd -m {{ username_on_the_ansible_host.stdout }}
-useradd -m -p sajEeYaHYyeSU {{ username_on_the_ansible_host.stdout }}
-mkdir /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
-echo "{{ user_ssh_public_key.stdout }}" >> /home/{{ username_on_the_ansible_host.stdout }}/.ssh/id_rsa.pub
-echo "{{ user_ssh_public_key.stdout }}" >> /home/{{ username_on_the_ansible_host.stdout }}/.ssh/authorized_keys
+#useradd -m $USERNAME
+useradd -m -p sajEeYaHYyeSU $USERNAME
+mkdir /home/$USERNAME/.ssh/
+echo $USER_SSHKEY > /home/$USERNAME/.ssh/id_rsa.pub
+echo $USER_SSHKEY >> /home/$USERNAME/.ssh/authorized_keys
 
-chown -R {{ username_on_the_ansible_host.stdout }}:{{ username_on_the_ansible_host.stdout }} /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
-chmod 0600 -r /home/{{ username_on_the_ansible_host.stdout }}/.ssh/
-restorecon -Rv /home/{{ username_on_the_ansible_host.stdout }}/.ssh
+chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh/
+chmod 0600 -r /home/$USERNAME/.ssh/
+restorecon -Rv /home/$USERNAME/.ssh
 # set this user to the sudoers
-echo '{{ username_on_the_ansible_host.stdout }}  ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
-#echo '{{ username_on_the_ansible_host.stdout }}  ALL=(ALL:ALL) ALL' >> /etc/sudoers
+echo "$USERNAME  ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
+#echo "$USERNAME  ALL=(ALL:ALL) ALL" >> /etc/sudoers
 # add user to the sudoers group
-usermod -aG wheel {{ username_on_the_ansible_host.stdout }}
+usermod -aG wheel $USERNAME
 
 # #############################################################################
 
@@ -75,12 +87,8 @@ timedatectl set-timezone UTC
 
 # Show network interfaces:
 # $ ip link show
-# read link name to variable and use this along...
-# via https://www.centos.org/forums/viewtopic.php?t=47083#p228136
+# read link name to variable and use this along... via https://www.centos.org/forums/viewtopic.php?t=47083#p228136
 interf="$(ip ntable | grep dev | sort | uniq | sed -e 's/^.*dev //;/^lo/d')"
-
-# set ipv4 via ansible templating
-ipv4="{{ ipv4 }}"
 
 # if ipv4 contains a valid ipv4 address
 if [[ "$ipv4" =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$ ]] ; then
@@ -88,24 +96,24 @@ if [[ "$ipv4" =~ ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|
   echo "# $ansible_notice
   DEVICE=$interf
   BOOTPROTO=static
-  DHCP_HOSTNAME={{ inventory_hostname }}
-  NETWORK={{ ip_network }}
-  NETMASK={{ ip_netmask }}
-  IPADDR={{ ipv4 }}
+  DHCP_HOSTNAME=$DHCP_HOSTNAME
+  NETWORK=$NETWORK
+  NETMASK=$NETMASK
+  IPADDR=$ipv4
   # deprecated:
   # BRADCAST=ip_broadcast
-  GATEWAY={{ ip_gateway }}
+  GATEWAY=$GATEWAY
   ONBOOT=yes
   TYPE=Ethernet
-  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
+  " > /etc/sysconfig/network-scripts/ifcfg-$interf
 
   echo "# $ansible_notice
-  HOSTNAME={{ inventory_hostname }}
-  GATEWAY={{ ip_gateway }}
-  DNS1={{ ip_gateway }}
-  DNS2=8.8.8.8
+  HOSTNAME=$HOSTNAME
+  GATEWAY=$GATEWAY
+  DNS1=$DNS1
+  DNS2=$DNS2
   # end via {{ ansible_managed }}
-  " >> /etc/sysconfig/network
+  " > /etc/sysconfig/network
 
   # get network connected
   ifup $interf
@@ -124,20 +132,20 @@ else
   PEERDNS=yes
   IPV6INIT=no
   PERSISTENT_DHCLIENT=1
-  " >> /etc/sysconfig/network-scripts/ifcfg-$interf
+  " > /etc/sysconfig/network-scripts/ifcfg-$interf
 
   echo "# $ansible_notice
-  HOSTNAME={{ inventory_hostname }}
+  HOSTNAME=$HOSTNAME
   # end via {{ ansible_managed }}
-  " >> /etc/sysconfig/network
+  " > /etc/sysconfig/network
 
   # get network connected // this seems much too much, but makes it certain to get connected
   ifup $interf
   dhclient -v
   systemctl restart network
-  sleep 20
+  sleep 10
   dhclient -v
-  sleep 60
+  sleep 2
 
   # info: statische IP mit DHCP : / via https://ubuntuforums.org/showthread.php?t=785047
   # /etc/dhcp3/dhclient.conf:
@@ -148,12 +156,15 @@ else
 fi
 
 # restart sshd in order to be visible on port 22 for detection by Ansible
+echo "cloud-init script for host '$HOSTNAME' userdata starting SSH on hostname: $(uname -n) ..." > /dev/kmsg
 service sshd restart
 # wait a while in order to be visible
-sleep 30
+sleep 10
 
 # Datei schreiben zum Schluss, die zur verifizierung dienen könnte...
 echo "$(date -u)" >> /tmp/fin_cloudinit.txt
+echo "cloud-init script for host '$HOSTNAME' userdata finished on hostname: $(uname -n) ..." > /dev/kmsg
+sleep 2
 
 # herunterfahren zum beenden / entfernen des CD images
 shutdown now

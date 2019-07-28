@@ -2,24 +2,35 @@
 
 # check /install required tools for this role
 
-# gather facts for the host it is delegatet to
+# gather facts for the host it is delegated to
 - setup:
 
 - name: check pip tools
-  pip: name="{{ item }}"
-  with_items:
-    - pysphere
+  pip:
+    name:
+      - pyvmomi
+      - netaddr
 
 - name: packages
-  package: name="{{ item }}" state=present
-  with_items:
-    - qemu-img
+  package:
+    state: present
+    name:
+      - qemu-img
   when: ansible_os_family != "Darwin"
 
+- name: packages on RedHat/CentOS/OracleLinux
+  package:
+    state: present
+    name:
+      - genisoimage
+  when: ansible_os_family = "RedHat"
+
 - name: packages on mac
-  homebrew: name="{{ item }}" state=present
-  with_items:
-    - qemu
+  homebrew:
+    state: present
+    name:
+      - qemu
+      - cdrtools
   when: ansible_os_family == "Darwin"
 
 - name: ovftool needs to be installed

@@ -7,7 +7,7 @@
 
 # preparations for host to be provisioned happen on local machine - das sind im Prinzip alle tasks...!
 - block:
-  - include: "tools.yml"
+  - include_tasks: "tools.yml"
 
   - name: Wait for vsphere to be available
     wait_for:
@@ -17,13 +17,13 @@
       timeout: 10
 
   - name: get facts from vsphere for guest (ignore failure)
-    vsphere_guest:
-      vcenter_hostname: "{{ vcenter_hostname }}"
+    vmware_guest_facts:
+      hostname: "{{ vcenter_hostname }}"
       username: "{{ vcenter_user }}"
       password: "{{ vcenter_pass }}"
+      datacenter: ha-datacenter
       validate_certs: no
-      guest: "{{ inventory_hostname }}"
-      vmware_guest_facts: yes
+      name: "{{ inventory_hostname }}"
     register: guestfacts
     ignore_errors: true
 
@@ -31,17 +31,21 @@
     fail:
       msg: "A virtual machine on this host with the name {{ inventory_hostname }} already exists!"
     when:
-      - guestfacts|succeeded
-      - guestfacts.ansible_facts.hw_instance_uuid | match("^[a-z,0-9]{8}\-.*$")
+      - guestfacts is successful
+      - guestfacts.ansible_facts.hw_instance_uuid is regex("^[a-z,0-9]{8}\-.*$")
 
   - name: Temp default temp folder to "/var/tmp/{{ role_path|basename }}/"
     set_fact:
       vmproim_tempfolder: "/var/tmp/{{ role_path|basename }}/"
+    tags:
+      - provision
 
   - name: Temp folder on MacOS or if TMPDIR variable is found
     set_fact:
       vmproim_tempfolder: "{{ lookup('env','TMPDIR') }}/{{ role_path|basename }}/"
     when: lookup('env','TMPDIR')
+    tags:
+      - provision
 
   - name: "create temp folder for staging of setup of vm images at {{ vmproim_tempfolder }}"
     file:
@@ -56,73 +60,22 @@
     notify:
       - delete temp folder
 
-  - name: download hdd image file for vm (can take very long!)
-    get_url:
-      url: "{{ vmproim_imagesource }}"
-      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-      checksum: "sha256:{{ vmproim_img_sha256 }}"
-    when: vmproim_imagesource | match("^(http|ftp)s?.*")
-
-  - name: copy hdd image for vm from given path
-    copy:
-      src: "{{ vmproim_imagesource }}"
-      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-    when: vmproim_imagesource | match("^\/.*\/?.*")
-
-  - stat:
-      path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-      checksum_algorithm: sha256
-    register: vmproim_img_filename_stat
-    when: vmproim_imagesource | match("^\/.*\/?.*")
-
-  - name: fail if checksum of copied image from path does not match
-    fail:
-      msg: "Checksum of the copied image source file differs from the requested checksum!"
-    when:
-      - vmproim_img_sha256 != vmproim_img_filename_stat.stat.checksum
-      - vmproim_imagesource | match("^\/.*\/?.*")
-
-  - name: convert to vmdk (if neccessary)
-    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6 -p {{ vmproim_img_filename }} {{ vmproim_vmdk }}"
-    args:
-      chdir: "{{ vmproim_tempfolder }}"
-      creates: "{{ vmproim_vmdk }}"
-    register: convertvmdk
-
-  - name: copy generic ovf template to local staging directory
-    template:
-      src: ovf-template.ovf.j2
-      dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
-    register: ofvtemplate
-
-  - name: convert image for vmware with ofvtool
-    shell: >
-      ovftool
-      --acceptAllEulas
-      --noSSLVerify
-      --skipManifestCheck
-      --diskMode=thin
-      --overwrite
-      "preconverted_{{ ofvtemplate_name }}"
-      "{{ ofvtemplate_name }}"
-    args:
-     chdir: "{{ vmproim_tempfolder }}"
-    when: ofvtemplate.changed or convertvmdk.changed
-
   - name: create cloud init folder
     file:
       path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}"
       state: directory
       mode: 0755
+    tags:
+      - provision
 
   - name: read this users ssh public key for cloud-init
     shell: cat ~/.ssh/id_rsa.pub
-    sudo: no
+    become: no
     register: user_ssh_public_key
 
   - name: read this users username (running the deploy)
     local_action: command whoami
-    sudo: no
+    become: no
     register: username_on_the_ansible_host
 
   - name: copy cloud-init user-data template for vm
@@ -157,6 +110,60 @@
     #when: metadata_task.changed or userdata_task.changed
     #ansible_os_family == 'Darwin'
 
+  - name: download hdd image file for vm (can take very long!)
+    get_url:
+      url: "{{ vmproim_imagesource }}"
+      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+      checksum: "sha256:{{ vmproim_img_sha256 }}"
+    when: vmproim_imagesource is regex("^(http|ftp)s?.*")
+
+  - name: copy hdd image for vm from given path
+    copy:
+      src: "{{ vmproim_imagesource }}"
+      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+    when: vmproim_imagesource is regex("^\/.*\/?.*")
+
+  - stat:
+      path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+      checksum_algorithm: sha256
+    register: vmproim_img_filename_stat
+    when: vmproim_imagesource is regex("^\/.*\/?.*")
+
+  - name: fail if checksum of copied image from path does not match
+    fail:
+      msg: "Checksum of the copied image source file differs from the requested checksum!"
+    when:
+      - vmproim_img_sha256 != vmproim_img_filename_stat.stat.checksum
+      - vmproim_imagesource is regex("^\/.*\/?.*")
+
+  - name: convert to vmdk (if neccessary)
+    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
+    #shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
+    args:
+      chdir: "{{ vmproim_tempfolder }}"
+      creates: "{{ vmproim_vmdk }}"
+    register: convertvmdk
+    # hint: on Mac and APFS filesystem qemu-img convert does not produce results that are usable up to now! Workaround: convert the file on an exFAT volume instead.
+
+  - name: copy generic ovf template to local staging directory
+    template:
+      src: ovf-template.ovf.j2
+      dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
+    register: ofvtemplate
+
+  - name: convert VM including hdd image for VMWare with ofvtool
+    shell: >
+      ovftool
+      --acceptAllEulas
+      --noSSLVerify
+      --skipManifestCheck
+      --diskMode=thin
+      --overwrite
+      "preconverted_{{ ofvtemplate_name }}"
+      "{{ ofvtemplate_name }}"
+    args:
+     chdir: "{{ vmproim_tempfolder }}"
+    when: ofvtemplate.changed or convertvmdk.changed
 
   # run this whole block via:
   delegate_to: localhost
@@ -164,7 +171,7 @@
     - prepare
 
 - block:
-  - name: transfer vm to host using VMWare ovftool
+  - name: deploy vm to VMWare host using VMWare ovftool
     shell: >
       ovftool
       --acceptAllEulas
@@ -180,51 +187,58 @@
       "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
     register: deploy_ovf_result
     # use --overwrite option if you want to overwrite the vm on the host,
-    #       else it fails if the host already exists
+    #       else it fails if the vm already exists
 
-  - name: copy cloud-init iso to hosting machine
-    vsphere_copy:
-      host: "{{ vcenter_hostname }}"
-      login: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      src: "{{ vmproim_tempfolder }}{{ cloudinit_iso }}"
-      datacenter: "{{ vmproim_datacenter }}"
-      datastore: "{{ vmproim_datastore }}"
-      path: "/{{ inventory_hostname }}/{{ cloudinit_iso }}"
-      validate_certs: no
+  # it seems not to work to deploy per module for free ESXi
+  #- name: deploy vm to VMWare host
+  #  vmware_deploy_ovf:
+  #    hostname: "{{ vcenter_hostname }}"
+  #    username: "{{ vcenter_user }}"
+  #    password: "{{ vcenter_pass }}"
+  #    datastore: "{{ vmproim_datastore }}"
+  #    #folder:
+  #    allow_duplicates: no
+  #    name: "{{ inventory_hostname }}"
+  #    networks: "{u'VM Network':u'{{ vmproim_network }}'}"
+  #    validate_certs: no
+  #    power_on: no
+  #    ovf: "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
 
-  - name: reconfigure VM on vSphere
-    vsphere_guest:
-      vcenter_hostname: "{{ vcenter_hostname }}"
-      username: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      validate_certs: no
-      guest: "{{ inventory_hostname }}"
-      state: reconfigured
-      vm_extra_config:
-        notes: "{{ vmproim_notes }}"
-    #  vm_disk:
-    #    disk1:
-    #      size_gb: "{{ disk }}"
-    #      type: thin
-    #      datastore: "{{ vmproim_datastore }}"
-      vm_nic:
-        nic1:
-          type: "{{ vmproim_nictype }}"
-          network: "{{ vmproim_network }}"
-          network_type: standard
-      vm_hardware:
-        memory_mb: "{{ memory }}"
-        num_cpus: "{{ cpucount }}"
-        osid: "{{ osid }}"
-        scsi: paravirtual
-        vm_cdrom:
-          type: "iso"
-          iso_path: "{{ vmproim_datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
-          state: connected
-      esxi:
-        datacenter: "{{ vmproim_datacenter }}"
-        hostname: "{{ vcenter_esxi }}"
+  # the following task still doesnt work with the module
+  #- name: "resize disk if needed on the VM on vSphere"
+  #  vmware_guest_disk:
+  #    hostname: "{{ vcenter_hostname }}"
+  #    username: "{{ vcenter_user }}"
+  #    password: "{{ vcenter_pass }}"
+  #    validate_certs: no
+  #    datacenter: "{{ vmproim_datacenter }}"
+  #    folder: "{{ vmproim_datacenter }}/{{ vmproim_datastore }}/{{ inventory_hostname }}"
+  #    name: "{{ inventory_hostname }}"
+  #    disk:
+  #      - size_gb: "{{ disk }}"
+  #        datastore: "{{ vmproim_datastore }}"
+  #        #type: thin
+  #        state: present
+  #        scsi_controller: 0
+  #        unit_number: 0
+  #        scsi_type: 'paravirtual'
+
+  # run this whole block via:
+  delegate_to: localhost
+  tags:
+    - provision
+
+- block:
+  # the following doesnt work on free ESXi
+  #- name: power on vm on vSphere
+  #  vmware_guest_powerstate:
+  #    hostname: "{{ vcenter_hostname }}"
+  #    username: "{{ vcenter_user }}"
+  #    password: "{{ vcenter_pass }}"
+  #    validate_certs: no
+  #    folder: "{{ vmproim_datacenter }}/{{ vmproim_datastore }}/{{ inventory_hostname }}"
+  #    name: "{{ inventory_hostname }}"
+  #    state: powered-on
 
   - name: power on vm on vSphere
     vsphere_guest:
@@ -238,12 +252,6 @@
         datacenter: "{{ vmproim_datacenter }}"
         hostname: "{{ vcenter_esxi }}"
 
-  # run this whole block via:
-  delegate_to: localhost
-  tags:
-    - provision
-
-- block:
   - name: set ip or hostname to ping
     set_fact:
       ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ inventory_hostname }}{% endif %}"
@@ -270,24 +278,20 @@
   - pause:
       seconds: 10
 
+  # the following task seem to work not as advertised
   - name: reconfigure VM on vSphere - detach cd image
-    vsphere_guest:
-      vcenter_hostname: "{{ vcenter_hostname }}"
+    vmware_guest:
+      hostname: "{{ vcenter_hostname }}"
       username: "{{ vcenter_user }}"
       password: "{{ vcenter_pass }}"
+      datacenter: "{{ vmproim_datacenter }}"
       validate_certs: no
-      guest: "{{ inventory_hostname }}"
-      state: reconfigured
-      vm_hardware:
-        vm_cdrom:
-          type: "iso"
-          iso_path: "{{ vmproim_datastore }}/{{ inventory_hostname }}/{{ cloudinit_iso }}"
-          state: disconnected
-      esxi:
-        datacenter: "{{ vmproim_datacenter }}"
-        hostname: "{{ vcenter_esxi }}"
+      name: "{{ inventory_hostname }}"
+      state: poweredoff
+      cdrom:
+        type: none
 
-  - name: power on vm on vSphere
+  - name: power on vm on vSphere after detaching iso
     vsphere_guest:
       vcenter_hostname: "{{ vcenter_hostname }}"
       username: "{{ vcenter_user }}"
@@ -305,7 +309,7 @@
       port: 22
       state: started
       timeout: 300
-      delay: 2
+      sleep: 2
 
   # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
 
@@ -341,6 +345,6 @@
 
   # run this whole block via:
   delegate_to: localhost
-  sudo: no
+  become: no
   tags:
     - reconfigure

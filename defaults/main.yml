@@ -14,36 +14,36 @@ vcenter_user: "{{ lookup('env', 'USER') }}"
 # password for the esxi host
 vcenter_pass: "password"
 
-# Default datacenter variable to ha-datacenter for ESXi
+# datacenter variable to ha-datacenter for ESXi
 vmproim_datacenter: 'ha-datacenter'
 
 # default datastore too save the vm on
 vmproim_datastore: 'datastore1'
 
-# Default Network name for vm's network
+# Network name for vm's network
 vmproim_network: 'VM Network'
 
-# type of network interface in virtual machine, mostly vmxnet3 or e1000 for backwards compatibility
-vmproim_nictype: 'vmxnet3'
+# type of network interface in virtual machine, mostly VmxNet3 or e1000 for backwards compatibility
+vmproim_nictype: 'VmxNet3'
 
 # static ip - if used, the host is set to static ip, otherwise dhcp
 ipv4: ''
 
-#Default notes for the virtual machine
+# notes for the virtual machine
 vmproim_notes: 'Created by Ansible'
 
 # set to yes if temporary folder should be deleted after run.
 vmproim_delete_temp_folder: 'yes'
 
 # name of the temporary iso file
-cloudinit_iso: "{{ inventory_hostname }}.iso"
+cloudinit_iso: "cloudinit_{{ inventory_hostname }}.iso"
 
 # image to download and provision - complete path with filename - or local path with filename
 # this local path must be accessible from the machine that ansible runs on!
-vmproim_imagesource: 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1612.qcow2'
+vmproim_imagesource: 'http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1905.qcow2'
 # other variant:
-#vmproim_imagesource: '/tmp/CentOS-7-x86_64-GenericCloud-1612.qcow2'
-vmproim_img_sha256: '559bebb4abb2fdf3bd88c917cc11efb1975bfe4494e666d133a3148ec4e6225d'
+#vmproim_imagesource: '/tmp/CentOS-7-x86_64-GenericCloud-1905.qcow2'
+vmproim_img_sha256: 'b376afdc0150601f15e53516327d9832216e01a300fecfc302066e36e2ac2b39'
 
 vmproim_img_filename: "{{ vmproim_imagesource | regex_replace('(.*)/(.+)$', '\\2') }}"
 vmproim_vmdk: "{{ vmproim_img_filename | regex_replace('(^.*)\\.(.+)$', '\\1') }}.vmdk"
