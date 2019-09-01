@@ -42,7 +42,7 @@
 
   - name: Temp folder on MacOS or if TMPDIR variable is found
     set_fact:
-      vmproim_tempfolder: "{{ lookup('env','TMPDIR') }}/{{ role_path|basename }}/"
+      vmproim_tempfolder: "{{ lookup('env','TMPDIR') }}{{ role_path|basename }}/"
     when: lookup('env','TMPDIR')
     tags:
       - provision
@@ -68,17 +68,34 @@
     tags:
       - provision
 
-  - name: read this users ssh public key for cloud-init
+  - name: read this users ssh public key for cloud-init if no user has been set
     shell: cat ~/.ssh/id_rsa.pub
     become: no
     register: user_ssh_public_key
+    when: vmproim_firstusersshpubkey == ""
 
-  - name: read this users username (running the deploy)
+  - name: set vmproim_firstusersshpubkey variable
+    set_fact:
+      vmproim_firstusersshpubkey: "{{ user_ssh_public_key.stdout }}"
+    when: vmproim_firstusersshpubkey == ""
+
+  - name: read this users username (running the deploy) if no user has been set
     local_action: command whoami
     become: no
     register: username_on_the_ansible_host
+    when: vmproim_firstusername == ""
 
-  - name: copy cloud-init user-data template for vm
+  - name: set vmproim_firstusername variable
+    set_fact:
+      vmproim_firstusername: "{{ username_on_the_ansible_host.stdout }}"
+    when: vmproim_firstusername == ""
+
+  - name: set vmproim_firstuserpasshash variable
+    set_fact:
+      vmproim_firstuserpasshash: 'sajEeYaHYyeSU' # 12345
+    when: vmproim_firstuserpasshash == ""
+
+  - name: "copy cloud-init user-data template for vm with initial user {{ vmproim_firstusername }}"
     template:
       src: user-data.txt.j2
       dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/user-data"
@@ -101,7 +118,7 @@
   #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
 
   - name: create cd image for cloud-init (with mkisofs)
-    shell: "mkisofs -output {{ cloudinit_iso }} -r -V cidata {{ inventory_hostname }}/"
+    shell: "mkisofs -output {{ cloudinit_iso }} -r -J -V cidata {{ inventory_hostname }}/"
     args:
       chdir: "{{ vmproim_tempfolder }}"
     #shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
@@ -265,7 +282,7 @@
 
   - name: wait for the vm to work init...
     pause:
-      seconds: 30
+      seconds: 20
 
   - name: Wait for the host to become unavailable = finished init
     wait_for:
