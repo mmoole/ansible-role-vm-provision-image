@@ -6,12 +6,15 @@
 # https://cloudinit.readthedocs.io/en/latest/topics/dir_layout.html
 # https://cloudinit.readthedocs.io/en/latest/topics/datasources/nocloud.html
 
+# this file must not contain any non-ASCII characters for compatibility reasons!
+
 # ## set variables here only
 # set disclaimer for automatically generated files
 ansible_notice="added by user-data init script via cloud-init on $(date -u) via Ansible"
 
-USERNAME={{ username_on_the_ansible_host.stdout }}
-USER_SSHKEY="{{ user_ssh_public_key.stdout }}"
+USERNAME={{ vmproim_firstusername }}
+USER_PASS={{ vmproim_firstuserpasshash }}
+USER_SSHKEY="{{ vmproim_firstusersshpubkey }}"
 
 # use only for static ipv4:
 ipv4="{{ ipv4 }}"
@@ -24,35 +27,35 @@ DNS1={{ ip_gateway }}
 DNS2=8.8.8.8
 # ## dont' set any variables below this line
 
-echo "cloud-init script for host '$HOSTNAME' userdata is now running on hostname: $(uname -n) ..." > /dev/kmsg
+echo "cloud-init script for host '$HOSTNAME' userdata is now running on hostname: $(uname -n) ..." >> /dev/kmsg
 
-# folgende Operationen als root durchführen (ist eigentlich sowieso der Fall, nur um sicher zu sein)
-su - root
+# folgende Operationen als root durchfuehren (ist eigentlich sowieso der Fall, nur um sicher zu sein)
+#su - root
 
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# Achtung: außer zu Testzwecken niemals ssh login nur mit passwort zulassen! !
+# Achtung: ausser zu Testzwecken niemals ssh login nur mit passwort zulassen! !
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 # ex: user admin mit password 12345
 # perl -e 'print crypt("passwordhere", "salt"),"\n"'
 
-# user ohne passwort hinzufügen:
+# user ohne passwort hinzufuegen:
 # useradd -m admin
 
 # testumgebung: user 'admin' mit passwort:
 # useradd -m -p sajEeYaHYyeSU admin
 # mkdir /home/admin/.ssh
 # echo 'admin  ALL=(ALL:ALL) ALL' >> /etc/sudoers
-# echo "{{ user_ssh_public_key.stdout }}" >> /home/admin/.ssh/id_rsa.pub
-# echo "{{ user_ssh_public_key.stdout }}" >> /home/admin/.ssh/authorized_keys
+# echo $USER_SSHKEY >> /home/admin/.ssh/id_rsa.pub
+# echo $USER_SSHKEY >> /home/admin/.ssh/authorized_keys
 
 
-# beispiel: public SSH Key für ROOT user rüberkopieren
-# echo "{{ user_ssh_public_key.stdout }}" >> ~/.ssh/id_rsa.pub
+# beispiel: public SSH Key fuer ROOT user rueberkopieren
+# echo $USER_SSHKEY >> ~/.ssh/id_rsa.pub
 
-# ansible user hinzufügen: // zum Test auch mit password
+# ansible user hinzufuegen: // zum Test auch mit password
 #useradd -m $USERNAME
-useradd -m -p sajEeYaHYyeSU $USERNAME
+useradd -m -p $USER_PASS $USERNAME
 mkdir /home/$USERNAME/.ssh/
 echo $USER_SSHKEY > /home/$USERNAME/.ssh/id_rsa.pub
 echo $USER_SSHKEY >> /home/$USERNAME/.ssh/authorized_keys
@@ -68,15 +71,15 @@ usermod -aG wheel $USERNAME
 
 # #############################################################################
 
-# deutsches keyboard einstellen - nützlich für direkte Verbindung
+# deutsches keyboard einstellen - nuetzlich fuer direkte Verbindung
 # localectl set-keymap de
 
 # Zeitzone UTC einstellen (ist eigentlich schon)
 timedatectl set-timezone UTC
 
-## ex: DHCP client ad-hoc ausführen um Netzwerk zu 'bekommen'
+## ex: DHCP client ad-hoc ausfuehren um Netzwerk zu 'bekommen'
 # dhclient -v
-# ggf workaround, damit dies zu start ausgeführt wird:
+# ggf workaround, damit dies zu start ausgefuehrt wird:
 # echo "#!/bin/bash
 # # Solution for "No Internet Connection from VMware"
 # ### BEGIN INIT INFO
@@ -156,18 +159,23 @@ else
 fi
 
 # restart sshd in order to be visible on port 22 for detection by Ansible
-echo "cloud-init script for host '$HOSTNAME' userdata starting SSH on hostname: $(uname -n) ..." > /dev/kmsg
+echo "cloud-init script for host '$HOSTNAME' userdata starting SSH on hostname: $(uname -n) ..." >> /dev/kmsg
 service sshd restart
 # wait a while in order to be visible
 sleep 10
 
-# Datei schreiben zum Schluss, die zur verifizierung dienen könnte...
+# Datei schreiben zum Schluss, die zur verifizierung dienen koennte...
 echo "$(date -u)" >> /tmp/fin_cloudinit.txt
-echo "cloud-init script for host '$HOSTNAME' userdata finished on hostname: $(uname -n) ..." > /dev/kmsg
+echo "cloud-init script for host '$HOSTNAME' userdata finished on hostname: $(uname -n) ..." >> /dev/kmsg
+# disable cloud-init on this instance in order to not run it again
+# disable for EL:
+#rm -f /etc/systemd/system/multi-user.target.wants/cloud*.service
+# disable for Ubunto, Fedora:
+#touch /etc/cloud/cloud-init.disabled
 sleep 2
 
 # herunterfahren zum beenden / entfernen des CD images
 shutdown now
 
-# eigentlich unnötig:
+# eigentlich unnoetig:
 exit 0

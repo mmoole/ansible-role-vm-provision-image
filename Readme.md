@@ -29,19 +29,28 @@ osid: 'centos64Guest'
 
 vmproim_imagesource: "/somepath/CentOS-7-x86_64-GenericCloud-1612.qcow2" # or an url
 vmproim_datastore: "name-of-datastore"
-vcenter_hostname=192.168.0.50
+vcenter_hostname: "192.168.0.50"
 vcenter_user: "root"
 vcenter_pass: "pass"
 vcenter_esxi: "esxhostname"
 
 ```
 
-Usage
+Example Usage
 -----
 
 ```yml
 roles:
   - vm-provision-image
+
+  vars_prompt:
+  - name: "vcenter_pass"
+    prompt: "Enter vCenter password"
+    private: yes
+  - name: "vmproim_delete_temp_folder"
+    prompt: "Delete temporary files folder yes/no (may contain big files to be re-downloaded)?"
+    private: no
+    default: "no"
 ```
 
 

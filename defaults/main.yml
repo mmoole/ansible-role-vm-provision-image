@@ -14,6 +14,13 @@ vcenter_user: "{{ lookup('env', 'USER') }}"
 # password for the esxi host
 vcenter_pass: "password"
 
+# name, password nand public ssh key for the user that is created in the vm at setup
+vmproim_firstusername: ""            # example: 'user1'
+vmproim_firstuserpasshash: ""        # 'sajEeYaHYyeSU' for 12345
+vmproim_firstusersshpubkey: ""       # example: "ssh 12345"
+# ex: user generate hash for password 12345
+# perl -e 'print crypt("12345", "salt"),"\n"'
+
 # datacenter variable to ha-datacenter for ESXi
 vmproim_datacenter: 'ha-datacenter'
 
