@@ -1,7 +1,8 @@
 About
 -----
 
-Ansible role for creating a virtual machine on VMWare Esxi/VSphere based on a hard disk image. Currently tested with CentOS 7 cloud image.
+Ansible role for creating a virtual machine on VMWare Esxi/VSphere based on a hard disk image. Currently tested with CentOS 8, Almalinux 8 and RockyLinux 8 cloud image.
+These images no longer contain scsi drivers so the HDD in the vortual machine is attached to the SATA controller. Older images not being compatible with this are not supported.
 
 Installation
 ------------
@@ -27,7 +28,7 @@ memory: '2048'
 cpucount: '2'
 osid: 'centos64Guest'
 
-vmproim_imagesource: "/somepath/CentOS-7-x86_64-GenericCloud-1612.qcow2" # or an url
+vmproim_imagesource: "/somepath/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2" # or an url
 vmproim_datastore: "name-of-datastore"
 vcenter_hostname: "192.168.0.50"
 vcenter_user: "root"
@@ -58,7 +59,8 @@ Requirements
 ------------
 
 This role depends on some external tools:
-* Pysphere -> $ pip install Pysphere
+* legacy: Pysphere -> $ pip install Pysphere
+* pyvmomi -> $ pip install pyvmomi
 * mkisofs / get it on Mac via brew install cdrtools
 * qemu-img for converting images
 * ovftool from VMWare, get it from https://www.vmware.com/support/developer/ovf/

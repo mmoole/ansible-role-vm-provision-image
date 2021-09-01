@@ -52,22 +52,12 @@
         <rasd:InstanceID>3</rasd:InstanceID>
         <rasd:ResourceSubType>vmware.sata.ahci</rasd:ResourceSubType>
         <rasd:ResourceType>20</rasd:ResourceType>
-        <vmw:Config ovf:required="false" vmw:key="slotInfo.pciSlotNumber" vmw:value="35"/>
-      </Item>
-      <Item>
-        <rasd:Address>0</rasd:Address>
-        <rasd:Description>SCSI Controller</rasd:Description>
-        <rasd:ElementName>SCSI Controller 0</rasd:ElementName>
-        <rasd:InstanceID>4</rasd:InstanceID>
-        <rasd:ResourceSubType>VirtualSCSI</rasd:ResourceSubType>
-        <rasd:ResourceType>6</rasd:ResourceType>
-        <vmw:Config ovf:required="false" vmw:key="slotInfo.pciSlotNumber" vmw:value="160"/>
       </Item>
       <Item ovf:required="false">
         <rasd:Address>0</rasd:Address>
         <rasd:Description>USB Controller (EHCI)</rasd:Description>
         <rasd:ElementName>USB Controller</rasd:ElementName>
-        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:InstanceID>4</rasd:InstanceID>
         <rasd:ResourceSubType>vmware.usb.ehci</rasd:ResourceSubType>
         <rasd:ResourceType>23</rasd:ResourceType>
         <vmw:Config ovf:required="false" vmw:key="autoConnectDevices" vmw:value="false"/>
@@ -79,20 +69,20 @@
         <rasd:Address>1</rasd:Address>
         <rasd:Description>IDE Controller</rasd:Description>
         <rasd:ElementName>VirtualIDEController 1</rasd:ElementName>
-        <rasd:InstanceID>6</rasd:InstanceID>
+        <rasd:InstanceID>5</rasd:InstanceID>
         <rasd:ResourceType>5</rasd:ResourceType>
       </Item>
       <Item>
         <rasd:Address>0</rasd:Address>
         <rasd:Description>IDE Controller</rasd:Description>
         <rasd:ElementName>VirtualIDEController 0</rasd:ElementName>
-        <rasd:InstanceID>7</rasd:InstanceID>
+        <rasd:InstanceID>6</rasd:InstanceID>
         <rasd:ResourceType>5</rasd:ResourceType>
       </Item>
       <Item ovf:required="false">
         <rasd:AutomaticAllocation>false</rasd:AutomaticAllocation>
         <rasd:ElementName>VirtualVideoCard</rasd:ElementName>
-        <rasd:InstanceID>8</rasd:InstanceID>
+        <rasd:InstanceID>7</rasd:InstanceID>
         <rasd:ResourceType>24</rasd:ResourceType>
         <vmw:Config ovf:required="false" vmw:key="enable3DSupport" vmw:value="false"/>
         <vmw:Config ovf:required="false" vmw:key="use3dRenderer" vmw:value="automatic"/>
@@ -102,7 +92,7 @@
       <Item ovf:required="false">
         <rasd:AutomaticAllocation>false</rasd:AutomaticAllocation>
         <rasd:ElementName>VirtualVMCIDevice</rasd:ElementName>
-        <rasd:InstanceID>9</rasd:InstanceID>
+        <rasd:InstanceID>8</rasd:InstanceID>
         <rasd:ResourceSubType>vmware.vmci</rasd:ResourceSubType>
         <rasd:ResourceType>1</rasd:ResourceType>
         <vmw:Config ovf:required="false" vmw:key="allowUnrestrictedCommunication" vmw:value="false"/>
@@ -113,27 +103,27 @@
         <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
         <rasd:ElementName>CD-ROM 1</rasd:ElementName>
         <rasd:HostResource>ovf:/file/file2</rasd:HostResource>
-        <rasd:InstanceID>10</rasd:InstanceID>
+        <rasd:InstanceID>9</rasd:InstanceID>
         <rasd:Parent>3</rasd:Parent>
         <rasd:ResourceSubType>vmware.cdrom.iso</rasd:ResourceSubType>
         <rasd:ResourceType>15</rasd:ResourceType>
       </Item>
       <Item>
-        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:AddressOnParent>1</rasd:AddressOnParent>
         <rasd:ElementName>Hard Disk 1</rasd:ElementName>
         <rasd:HostResource>ovf:/disk/vmdisk1</rasd:HostResource>
-        <rasd:InstanceID>11</rasd:InstanceID>
-        <rasd:Parent>4</rasd:Parent>
+        <rasd:InstanceID>10</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
         <rasd:ResourceType>17</rasd:ResourceType>
         <vmw:Config ovf:required="false" vmw:key="backing.writeThrough" vmw:value="false"/>
       </Item>
       <Item>
         <rasd:AddressOnParent>7</rasd:AddressOnParent>
         <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
-        <rasd:Connection>VM Network</rasd:Connection>
+        <rasd:Connection>{{ vmproim_network }}</rasd:Connection>
         <rasd:Description>{{ vmproim_nictype }} ethernet adapter on &quot;{{ vmproim_network }}&quot;</rasd:Description>
         <rasd:ElementName>Ethernet 1</rasd:ElementName>
-        <rasd:InstanceID>12</rasd:InstanceID>
+        <rasd:InstanceID>11</rasd:InstanceID>
         <rasd:ResourceSubType>{{ vmproim_nictype }}</rasd:ResourceSubType>
         <rasd:ResourceType>10</rasd:ResourceType>
         <vmw:Config ovf:required="false" vmw:key="wakeOnLanEnabled" vmw:value="false"/>
@@ -144,6 +134,7 @@
       <vmw:Config ovf:required="false" vmw:key="virtualICH7MPresent" vmw:value="false"/>
       <vmw:Config ovf:required="false" vmw:key="virtualSMCPresent" vmw:value="false"/>
       <vmw:Config ovf:required="false" vmw:key="memoryHotAddEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="firmware" vmw:value="bios"/>
       <vmw:Config ovf:required="false" vmw:key="nestedHVEnabled" vmw:value="true"/>
       <vmw:Config ovf:required="false" vmw:key="powerOpInfo.powerOffType" vmw:value="soft"/>
       <vmw:Config ovf:required="false" vmw:key="powerOpInfo.resetType" vmw:value="soft"/>
@@ -155,6 +146,8 @@
       <vmw:Config ovf:required="false" vmw:key="tools.beforeGuestStandby" vmw:value="true"/>
       <vmw:Config ovf:required="false" vmw:key="tools.syncTimeWithHost" vmw:value="false"/>
       <vmw:Config ovf:required="false" vmw:key="tools.toolsUpgradePolicy" vmw:value="manual"/>
+      <vmw:ExtraConfig ovf:required="false" vmw:key="isolation.tools.copy.disable" vmw:value="FALSE"/>
+      <vmw:ExtraConfig ovf:required="false" vmw:key="isolation.tools.paste.disable" vmw:value="FALSE"/>
     </VirtualHardwareSection>
     <AnnotationSection ovf:required="false">
       <Info>A human-readable annotation</Info>

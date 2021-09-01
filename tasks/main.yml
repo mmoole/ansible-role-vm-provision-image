@@ -140,7 +140,8 @@
       dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
     when: vmproim_imagesource is regex("^\/.*\/?.*")
 
-  - stat:
+  - name: Use sha256 to calculate checksum
+    ansible.builtin.stat:
       path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
       checksum_algorithm: sha256
     register: vmproim_img_filename_stat
@@ -154,7 +155,7 @@
       - vmproim_imagesource is regex("^\/.*\/?.*")
 
   - name: convert to vmdk (if neccessary)
-    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic,subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
+    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
     #shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
     args:
       chdir: "{{ vmproim_tempfolder }}"
@@ -174,6 +175,7 @@
       --acceptAllEulas
       --noSSLVerify
       --skipManifestCheck
+      --allowExtraConfig
       --diskMode=thin
       --overwrite
       "preconverted_{{ ofvtemplate_name }}"
@@ -188,12 +190,14 @@
     - prepare
 
 - block:
-  - name: deploy vm to VMWare host using VMWare ovftool
+  - name: deploy vm to VMWare host using VMWare ovftool, power it on when finished
     shell: >
       ovftool
       --acceptAllEulas
       --noSSLVerify
       --skipManifestCheck
+      --allowExtraConfig
+      --powerOn
       --X:logFile="{{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log"
       --diskMode=thin
       --diskSize:template2,11="{{ disk * 1024 * 1024 }}"
@@ -246,29 +250,6 @@
     - provision
 
 - block:
-  # the following doesnt work on free ESXi
-  #- name: power on vm on vSphere
-  #  vmware_guest_powerstate:
-  #    hostname: "{{ vcenter_hostname }}"
-  #    username: "{{ vcenter_user }}"
-  #    password: "{{ vcenter_pass }}"
-  #    validate_certs: no
-  #    folder: "{{ vmproim_datacenter }}/{{ vmproim_datastore }}/{{ inventory_hostname }}"
-  #    name: "{{ inventory_hostname }}"
-  #    state: powered-on
-
-  - name: power on vm on vSphere
-    vsphere_guest:
-      vcenter_hostname: "{{ vcenter_hostname }}"
-      username: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      validate_certs: no
-      guest: "{{ inventory_hostname }}"
-      state: powered_on
-      esxi:
-        datacenter: "{{ vmproim_datacenter }}"
-        hostname: "{{ vcenter_esxi }}"
-
   - name: set ip or hostname to ping
     set_fact:
       ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ inventory_hostname }}{% endif %}"
@@ -277,7 +258,8 @@
     wait_for:
       host: '{{ ping_hostname }}'
       port: 22
-      state: started
+      # state: started
+      search_regex: OpenSSH
       timeout: 300
 
   - name: wait for the vm to work init...
