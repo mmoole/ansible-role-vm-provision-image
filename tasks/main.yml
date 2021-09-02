@@ -161,7 +161,7 @@
       chdir: "{{ vmproim_tempfolder }}"
       creates: "{{ vmproim_vmdk }}"
     register: convertvmdk
-    # hint: on Mac and APFS filesystem qemu-img convert does not produce results that are usable up to now! Workaround: convert the file on an exFAT volume instead.
+    # hint: on Mac and APFS filesystem qemu-img convert does not produce results that are usable up to now! Workaround: convert the file on an exFAT volume instead. This seems to be resolved.
 
   - name: copy generic ovf template to local staging directory
     template:
@@ -200,7 +200,6 @@
       --powerOn
       --X:logFile="{{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log"
       --diskMode=thin
-      --diskSize:template2,11="{{ disk * 1024 * 1024 }}"
       --name="{{ inventory_hostname }}"
       --datastore="{{ vmproim_datastore }}"
       --network="{{ vmproim_network }}"
@@ -209,40 +208,8 @@
     register: deploy_ovf_result
     # use --overwrite option if you want to overwrite the vm on the host,
     #       else it fails if the vm already exists
+    # use --diskSize:template2,10="{{ disk * 1024 }}" in order to resize/grow the disk, but this seeems not to be needed
 
-  # it seems not to work to deploy per module for free ESXi
-  #- name: deploy vm to VMWare host
-  #  vmware_deploy_ovf:
-  #    hostname: "{{ vcenter_hostname }}"
-  #    username: "{{ vcenter_user }}"
-  #    password: "{{ vcenter_pass }}"
-  #    datastore: "{{ vmproim_datastore }}"
-  #    #folder:
-  #    allow_duplicates: no
-  #    name: "{{ inventory_hostname }}"
-  #    networks: "{u'VM Network':u'{{ vmproim_network }}'}"
-  #    validate_certs: no
-  #    power_on: no
-  #    ovf: "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
-
-  # the following task still doesnt work with the module
-  #- name: "resize disk if needed on the VM on vSphere"
-  #  vmware_guest_disk:
-  #    hostname: "{{ vcenter_hostname }}"
-  #    username: "{{ vcenter_user }}"
-  #    password: "{{ vcenter_pass }}"
-  #    validate_certs: no
-  #    datacenter: "{{ vmproim_datacenter }}"
-  #    folder: "{{ vmproim_datacenter }}/{{ vmproim_datastore }}/{{ inventory_hostname }}"
-  #    name: "{{ inventory_hostname }}"
-  #    disk:
-  #      - size_gb: "{{ disk }}"
-  #        datastore: "{{ vmproim_datastore }}"
-  #        #type: thin
-  #        state: present
-  #        scsi_controller: 0
-  #        unit_number: 0
-  #        scsi_type: 'paravirtual'
 
   # run this whole block via:
   delegate_to: localhost
@@ -277,30 +244,18 @@
   - pause:
       seconds: 10
 
-  # the following task seem to work not as advertised
-  - name: reconfigure VM on vSphere - detach cd image
-    vmware_guest:
-      hostname: "{{ vcenter_hostname }}"
-      username: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      datacenter: "{{ vmproim_datacenter }}"
-      validate_certs: no
-      name: "{{ inventory_hostname }}"
-      state: poweredoff
-      cdrom:
-        type: none
-
-  - name: power on vm on vSphere after detaching iso
-    vsphere_guest:
-      vcenter_hostname: "{{ vcenter_hostname }}"
-      username: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      validate_certs: no
-      guest: "{{ inventory_hostname }}"
-      state: powered_on
-      esxi:
-        datacenter: "{{ vmproim_datacenter }}"
-        hostname: "{{ vcenter_esxi }}"
+  # the following task seems to work not as advertised, and is not supported for free ESXi
+  # - name: reconfigure VM on vSphere - detach cd image
+  #   vmware_guest:
+  #     hostname: "{{ vcenter_hostname }}"
+  #     username: "{{ vcenter_user }}"
+  #     password: "{{ vcenter_pass }}"
+  #     datacenter: "{{ vmproim_datacenter }}"
+  #     validate_certs: no
+  #     name: "{{ inventory_hostname }}"
+  #     state: poweredoff
+  #     cdrom:
+  #       type: none
 
   - name: Wait for the post-reboot SSH to become available
     wait_for:

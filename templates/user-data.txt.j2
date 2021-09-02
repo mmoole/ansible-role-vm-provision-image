@@ -172,10 +172,13 @@ echo "cloud-init script for host '$HOSTNAME' userdata finished on hostname: $(un
 #rm -f /etc/systemd/system/multi-user.target.wants/cloud*.service
 # disable for Ubunto, Fedora:
 #touch /etc/cloud/cloud-init.disabled
-sleep 2
+sleep 5
 
-# herunterfahren zum beenden / entfernen des CD images
-shutdown now
+# shutdown to finish / remove cd-rom image
+# shutdown now
+
+# reboot in order to have a fleshly booted system
+reboot
 
 # eigentlich unnoetig:
 exit 0

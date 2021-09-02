@@ -2,57 +2,66 @@
 # This directory contains defaults for variables used in roles
 
 # can be a hostname or an ip address
-vcenter_hostname: "192.168.0.123"
+vcenter_hostname:           "192.168.0.123"
 
 # the esxi host to be used
-vcenter_esxi: "esxhost.lan"
+vcenter_esxi:               "esxhost.lan"
 
-# username to login on the esxi host
-vcenter_user: "{{ lookup('env', 'USER') }}"
-#vcenter_user: "root"
+# username to login on the esxi host, could be "root"
+vcenter_user:               "{{ lookup('env', 'USER') }}"
 
 # password for the esxi host
-vcenter_pass: "password"
+vcenter_pass:               "password"
 
-# name, password nand public ssh key for the user that is created in the vm at setup
+# name, password and public ssh key for the user that is created in the vm at setup
 vmproim_firstusername: ""            # example: 'user1'
-vmproim_firstuserpasshash: ""        # 'sajEeYaHYyeSU' for 12345
+vmproim_firstuserpasshash:  ""       # 'sajEeYaHYyeSU' for 12345
 vmproim_firstusersshpubkey: ""       # example: "ssh 12345"
-# ex: user generate hash for password 12345
+# ex:                       user generate hash for password 12345
 # perl -e 'print crypt("12345", "salt"),"\n"'
 
 # datacenter variable to ha-datacenter for ESXi
-vmproim_datacenter: 'ha-datacenter'
+vmproim_datacenter:         'ha-datacenter'
 
 # default datastore too save the vm on
-vmproim_datastore: 'datastore1'
+vmproim_datastore:          'datastore1'
 
 # Network name for vm's network
-vmproim_network: 'VM Network'
+vmproim_network:            'VM Network'
 
 # type of network interface in virtual machine, mostly VmxNet3 or e1000 for backwards compatibility
-vmproim_nictype: 'VmxNet3'
+vmproim_nictype:            'VmxNet3'
 
 # static ip - if used, the host is set to static ip, otherwise dhcp
-ipv4: ''
+ipv4:                       ''
+# ip_network: '' # network for static config
+# ip_netmask: '' # netmask for static config
+# ip_gateway: '' # gateway for static config
 
 # notes for the virtual machine
-vmproim_notes: 'Created by Ansible'
+vmproim_notes:              'Created by Ansible'
+
+# settings for the virtual hardware of the vm
+disk:                       '14' # disk dize in GiB, must be same or equal to the expanded size of the virtual disk source image file
+memory:                     '4096' # RAM in MiB, must be a multiple of 4
+cpucount:                   '6' # number of cpus to set for the vm
+osid:                       'centos64Guest' # see  for valid values /make sure your system supports it: https://vdc-download.vmware.com/vmwb-repository/dcr-public/8946c1b6-2861-4c12-a45f-f14ae0d3b1b9/a5b8094c-c222-4307-9399-3b606a04af55/vim.vm.GuestOsDescriptor.GuestOsIdentifier.html
+
 
 # set to yes if temporary folder should be deleted after run.
 vmproim_delete_temp_folder: 'yes'
 
 # name of the temporary iso file
-cloudinit_iso: "cloudinit_{{ inventory_hostname }}.iso"
+cloudinit_iso:              "cloudinit_{{ inventory_hostname }}.iso"
 
 # image to download and provision - complete path with filename - or local path with filename
 # this local path must be accessible from the machine that ansible runs on!
-vmproim_imagesource: 'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
+vmproim_imagesource:        'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
 # other variant:
-#vmproim_imagesource: '/tmp/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
-vmproim_img_sha256: '3510fc7deb3e1939dbf3fe6f65a02ab1efcc763480bc352e4c06eca2e4f7c2a2'
+#vmproim_imagesource:       '/tmp/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
+vmproim_img_sha256:         '3510fc7deb3e1939dbf3fe6f65a02ab1efcc763480bc352e4c06eca2e4f7c2a2'
 
-vmproim_img_filename: "{{ vmproim_imagesource | regex_replace('(.*)/(.+)$', '\\2') }}"
-vmproim_vmdk: "{{ vmproim_img_filename | regex_replace('(^.*)\\.(.+)$', '\\1') }}.vmdk"
+vmproim_img_filename:       "{{ vmproim_imagesource | regex_replace('(.*)/(.+)$', '\\2') }}"
+vmproim_vmdk:               "{{ vmproim_img_filename | regex_replace('(^.*)\\.(.+)$', '\\1') }}.vmdk"
 
-ofvtemplate_name: vm_provision_template.ovf
+ofvtemplate_name:           vm_provision_template.ovf
