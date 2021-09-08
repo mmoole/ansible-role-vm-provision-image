@@ -145,7 +145,7 @@ else
   # get network connected // this seems much too much, but makes it certain to get connected
   ifup $interf
   dhclient -v
-  systemctl restart network
+  systemctl restart NetworkManager
   sleep 10
   dhclient -v
   sleep 2

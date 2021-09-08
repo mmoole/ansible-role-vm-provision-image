@@ -56,7 +56,7 @@ cloudinit_iso:              "cloudinit_{{ inventory_hostname }}.iso"
 
 # image to download and provision - complete path with filename - or local path with filename
 # this local path must be accessible from the machine that ansible runs on!
-vmproim_imagesource:        'https://cloud.centos.org/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
+vmproim_imagesource:        'https://someservername/centos/8/x86_64/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
 # other variant:
 #vmproim_imagesource:       '/tmp/images/CentOS-8-GenericCloud-8.4.2105-20210603.0.x86_64.qcow2'
 vmproim_img_sha256:         '3510fc7deb3e1939dbf3fe6f65a02ab1efcc763480bc352e4c06eca2e4f7c2a2'
