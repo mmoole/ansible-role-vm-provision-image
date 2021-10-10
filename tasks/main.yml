@@ -32,7 +32,9 @@
       msg: "A virtual machine on this host with the name {{ inventory_hostname }} already exists!"
     when:
       - guestfacts is successful
-      - guestfacts.ansible_facts.hw_instance_uuid is regex("^[a-z,0-9]{8}\-.*$")
+      - 'guestfacts.ansible_facts.hw_instance_uuid is regex("^[a-z,0-9]{8}\-.*$")'
+    tags:
+      - provision
 
   - name: Temp default temp folder to "/var/tmp/{{ role_path|basename }}/"
     set_fact:
@@ -53,8 +55,8 @@
       state: directory
       mode: 0755
 
-  #- name: info temp folder will be deleted after run
-  - debug: msg="info temp folder will be deleted after run"
+  - name: info temp folder will be deleted after run
+    debug: msg="info temp folder will be deleted after run"
     when: vmproim_delete_temp_folder == "yes"
     changed_when: true
     notify:
@@ -92,7 +94,7 @@
 
   - name: set vmproim_firstuserpasshash variable
     set_fact:
-      vmproim_firstuserpasshash: 'sajEeYaHYyeSU' # 12345
+      vmproim_firstuserpasshash: 'sajEeYaHYyeSU'   # 12345
     when: vmproim_firstuserpasshash == ""
 
   - name: "copy cloud-init user-data template for vm with initial user {{ vmproim_firstusername }}"
@@ -108,11 +110,11 @@
     register: metadata_task
 
   # userdata via cloud-config openstack - funktioniert leider nicht in der vm.
-  #- file:
+  # - file:
   #    path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest"
   #    state: directory
   #    recurse: yes
-  #- name: copy cloud-init userdata openstack template for vm
+  # - name: copy cloud-init userdata openstack template for vm
   #  template:
   #    src: user-data.txt.j2
   #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
@@ -121,11 +123,11 @@
     shell: "mkisofs -output {{ cloudinit_iso }} -r -J -V cidata {{ inventory_hostname }}/"
     args:
       chdir: "{{ vmproim_tempfolder }}"
-    #shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
+    # shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
     # auskommentiert: -V user-data // -V cidata
-      #creates: "{{ cloudinit_iso }}"
-    #when: metadata_task.changed or userdata_task.changed
-    #ansible_os_family == 'Darwin'
+    #   creates: "{{ cloudinit_iso }}"
+    # when: metadata_task.changed or userdata_task.changed
+    # ansible_os_family == 'Darwin'
 
   - name: download hdd image file for vm (can take very long!)
     get_url:
@@ -138,6 +140,7 @@
     copy:
       src: "{{ vmproim_imagesource }}"
       dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+      mode: 0644
     when: vmproim_imagesource is regex("^\/.*\/?.*")
 
   - name: Use sha256 to calculate checksum
@@ -156,7 +159,7 @@
 
   - name: convert to vmdk (if neccessary)
     shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
-    #shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
+    # shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
     args:
       chdir: "{{ vmproim_tempfolder }}"
       creates: "{{ vmproim_vmdk }}"
@@ -167,6 +170,7 @@
     template:
       src: ovf-template.ovf.j2
       dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
+      mode: 0644
     register: ofvtemplate
 
   - name: convert VM including hdd image for VMWare with ofvtool
@@ -181,7 +185,7 @@
       "preconverted_{{ ofvtemplate_name }}"
       "{{ ofvtemplate_name }}"
     args:
-     chdir: "{{ vmproim_tempfolder }}"
+      chdir: "{{ vmproim_tempfolder }}"
     when: ofvtemplate.changed or convertvmdk.changed
 
   # run this whole block via:
@@ -190,25 +194,25 @@
     - prepare
 
 - block:
-  - name: deploy vm to VMWare host using VMWare ovftool, power it on when finished
-    shell: >
-      ovftool
-      --acceptAllEulas
-      --noSSLVerify
-      --skipManifestCheck
-      --allowExtraConfig
-      --powerOn
-      --X:logFile="{{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log"
-      --diskMode=thin
-      --name="{{ inventory_hostname }}"
-      --datastore="{{ vmproim_datastore }}"
-      --network="{{ vmproim_network }}"
-      "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
-      "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
-    register: deploy_ovf_result
-    # use --overwrite option if you want to overwrite the vm on the host,
-    #       else it fails if the vm already exists
-    # use --diskSize:template2,10="{{ disk * 1024 }}" in order to resize/grow the disk, but this seeems not to be needed
+    - name: deploy vm to VMWare host using VMWare ovftool, power it on when finished
+      shell: >
+        ovftool
+        --acceptAllEulas
+        --noSSLVerify
+        --skipManifestCheck
+        --allowExtraConfig
+        --powerOn
+        --X:logFile="{{ vmproim_tempfolder }}deploy_ovftool_{{ inventory_hostname }}.log"
+        --diskMode=thin
+        --name="{{ inventory_hostname }}"
+        --datastore="{{ vmproim_datastore }}"
+        --network="{{ vmproim_network }}"
+        "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
+        "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
+      register: deploy_ovf_result
+      # use --overwrite option if you want to overwrite the vm on the host,
+      #       else it fails if the vm already exists
+      # use --diskSize:template2,10="{{ disk * 1024 }}" in order to resize/grow the disk, but this seeems not to be needed
 
 
   # run this whole block via:
@@ -219,7 +223,7 @@
 - block:
   - name: set ip or hostname to ping
     set_fact:
-      ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ inventory_hostname }}{% endif %}"
+      ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ ansible_host }}{% endif %}"
 
   - name: "Wait for the post-install SSH to become available at {{ ping_hostname }}"
     wait_for:
@@ -241,7 +245,8 @@
       timeout: 300
 
   # warten, falls der host einige Zeit zum herunterfahren benötigt
-  - pause:
+  - name: waiting...
+    pause:
       seconds: 10
 
   # the following task seems to work not as advertised, and is not supported for free ESXi
@@ -293,7 +298,7 @@
 
   - name: ensure the newly created host is an ssh known host (unsecure for MITM!!)
     known_hosts:
-      #path: /etc/ssh/ssh_known_hosts
+      # path: /etc/ssh/ssh_known_hosts
       name: "{{ ping_hostname }}"
       key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ ping_hostname }}') }}"
 

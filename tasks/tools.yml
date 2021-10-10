@@ -1,9 +1,9 @@
 ---
-
 # check /install required tools for this role
 
 # gather facts for the host it is delegated to
-- setup:
+- name: run setup to gather variables
+  setup:
 
 - name: check pip tools
   pip:
@@ -23,6 +23,8 @@
     state: present
     name:
       - genisoimage
+      - python3-netaddr
+      - bind-utils
   when: ansible_os_family == "RedHat"
 
 - name: packages on mac
