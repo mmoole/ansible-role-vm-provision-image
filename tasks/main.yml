@@ -1,201 +1,215 @@
 ---
 # Prerequisites:
+# ansible-galaxy collection install community.vmware
+# ansible-galaxy collection install ansible.netcommon
 # $ pip install Pysphere
 # mkisofs / on Mac via brew install cdrtools
 # qemu-img
 # ofvtool from vmware (this is a free tool)
 
 # preparations for host to be provisioned happen on local machine - das sind im Prinzip alle tasks...!
-- block:
-  - include_tasks: "tools.yml"
 
-  - name: Wait for vsphere to be available
-    wait_for:
-      host: '{{ vcenter_hostname }}'
-      port: 80
-      state: started
-      timeout: 10
-
-  - name: get facts from vsphere for guest (ignore failure)
-    vmware_guest_facts:
-      hostname: "{{ vcenter_hostname }}"
-      username: "{{ vcenter_user }}"
-      password: "{{ vcenter_pass }}"
-      datacenter: ha-datacenter
-      validate_certs: no
-      name: "{{ inventory_hostname }}"
-    register: guestfacts
-    ignore_errors: true
-
-  - name: fail if guest virtual machine already exists
-    fail:
-      msg: "A virtual machine on this host with the name {{ inventory_hostname }} already exists!"
-    when:
-      - guestfacts is successful
-      - 'guestfacts.ansible_facts.hw_instance_uuid is regex("^[a-z,0-9]{8}\-.*$")'
-    tags:
-      - provision
-
-  - name: Temp default temp folder to "/var/tmp/{{ role_path|basename }}/"
-    set_fact:
-      vmproim_tempfolder: "/var/tmp/{{ role_path|basename }}/"
-    tags:
-      - provision
-
-  - name: Temp folder on MacOS or if TMPDIR variable is found
-    set_fact:
-      vmproim_tempfolder: "{{ lookup('env','TMPDIR') }}{{ role_path|basename }}/"
-    when: lookup('env','TMPDIR')
-    tags:
-      - provision
-
-  - name: "create temp folder for staging of setup of vm images at {{ vmproim_tempfolder }}"
-    file:
-      path: "{{ vmproim_tempfolder }}"
-      state: directory
-      mode: 0755
-
-  - name: info temp folder will be deleted after run
-    debug: msg="info temp folder will be deleted after run"
-    when: vmproim_delete_temp_folder == "yes"
-    changed_when: true
-    notify:
-      - delete temp folder
-
-  - name: create cloud init folder
-    file:
-      path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}"
-      state: directory
-      mode: 0755
-    tags:
-      - provision
-
-  - name: read this users ssh public key for cloud-init if no user has been set
-    shell: cat ~/.ssh/id_rsa.pub
-    become: no
-    register: user_ssh_public_key
-    when: vmproim_firstusersshpubkey == ""
-
-  - name: set vmproim_firstusersshpubkey variable
-    set_fact:
-      vmproim_firstusersshpubkey: "{{ user_ssh_public_key.stdout }}"
-    when: vmproim_firstusersshpubkey == ""
-
-  - name: read this users username (running the deploy) if no user has been set
-    local_action: command whoami
-    become: no
-    register: username_on_the_ansible_host
-    when: vmproim_firstusername == ""
-
-  - name: set vmproim_firstusername variable
-    set_fact:
-      vmproim_firstusername: "{{ username_on_the_ansible_host.stdout }}"
-    when: vmproim_firstusername == ""
-
-  - name: set vmproim_firstuserpasshash variable
-    set_fact:
-      vmproim_firstuserpasshash: 'sajEeYaHYyeSU'   # 12345
-    when: vmproim_firstuserpasshash == ""
-
-  - name: "copy cloud-init user-data template for vm with initial user {{ vmproim_firstusername }}"
-    template:
-      src: user-data.txt.j2
-      dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/user-data"
-    register: userdata_task
-
-  - name: copy cloud-init meta-data template for vm
-    template:
-      src: meta-data.txt.j2
-      dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/meta-data"
-    register: metadata_task
-
-  # userdata via cloud-config openstack - funktioniert leider nicht in der vm.
-  # - file:
-  #    path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest"
-  #    state: directory
-  #    recurse: yes
-  # - name: copy cloud-init userdata openstack template for vm
-  #  template:
-  #    src: user-data.txt.j2
-  #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
-
-  - name: create cd image for cloud-init (with mkisofs)
-    shell: "mkisofs -output {{ cloudinit_iso }} -r -J -V cidata {{ inventory_hostname }}/"
-    args:
-      chdir: "{{ vmproim_tempfolder }}"
-    # shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
-    # auskommentiert: -V user-data // -V cidata
-    #   creates: "{{ cloudinit_iso }}"
-    # when: metadata_task.changed or userdata_task.changed
-    # ansible_os_family == 'Darwin'
-
-  - name: download hdd image file for vm (can take very long!)
-    get_url:
-      url: "{{ vmproim_imagesource }}"
-      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-      checksum: "sha256:{{ vmproim_img_sha256 }}"
-    when: vmproim_imagesource is regex("^(http|ftp)s?.*")
-
-  - name: copy hdd image for vm from given path
-    copy:
-      src: "{{ vmproim_imagesource }}"
-      dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-      mode: 0644
-    when: vmproim_imagesource is regex("^\/.*\/?.*")
-
-  - name: Use sha256 to calculate checksum
-    ansible.builtin.stat:
-      path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
-      checksum_algorithm: sha256
-    register: vmproim_img_filename_stat
-    when: vmproim_imagesource is regex("^\/.*\/?.*")
-
-  - name: fail if checksum of copied image from path does not match
-    fail:
-      msg: "Checksum of the copied image source file differs from the requested checksum!"
-    when:
-      - vmproim_img_sha256 != vmproim_img_filename_stat.stat.checksum
-      - vmproim_imagesource is regex("^\/.*\/?.*")
-
-  - name: convert to vmdk (if neccessary)
-    shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
-    # shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
-    args:
-      chdir: "{{ vmproim_tempfolder }}"
-      creates: "{{ vmproim_vmdk }}"
-    register: convertvmdk
-    # hint: on Mac and APFS filesystem qemu-img convert does not produce results that are usable up to now! Workaround: convert the file on an exFAT volume instead. This seems to be resolved.
-
-  - name: copy generic ovf template to local staging directory
-    template:
-      src: ovf-template.ovf.j2
-      dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
-      mode: 0644
-    register: ofvtemplate
-
-  - name: convert VM including hdd image for VMWare with ofvtool
-    shell: >
-      ovftool
-      --acceptAllEulas
-      --noSSLVerify
-      --skipManifestCheck
-      --allowExtraConfig
-      --diskMode=thin
-      --overwrite
-      "preconverted_{{ ofvtemplate_name }}"
-      "{{ ofvtemplate_name }}"
-    args:
-      chdir: "{{ vmproim_tempfolder }}"
-    when: ofvtemplate.changed or convertvmdk.changed
-
-  # run this whole block via:
+- name: Block to be run on control machine
   delegate_to: localhost
   tags:
     - prepare
+  block:
+    - name: Include tasks for helper tools for this role
+      ansible.builtin.include_tasks: "tools.yml"
 
-- block:
-    - name: deploy vm to VMWare host using VMWare ovftool, power it on when finished
-      shell: >
+    - name: Waiting for vsphere to be available
+      ansible.builtin.wait_for:
+        host: "{{ vcenter_hostname }}"
+        port: 80
+        state: started
+        timeout: 10
+
+    - name: Get facts from vsphere for guest (ignore failure)
+      vmware_guest_info:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_pass }}"
+        datacenter: ha-datacenter
+        validate_certs: no
+        name: "{{ inventory_hostname }}"
+      register: guestfacts
+      ignore_errors: true
+
+    - name: Fail if guest virtual machine already exists
+      ansible.builtin.fail:
+        msg: "A virtual machine on this host with the name {{ inventory_hostname }} already exists!"
+      when:
+        - guestfacts is successful
+        - 'guestfacts.ansible_facts.hw_instance_uuid is regex("^[a-z,0-9]{8}\-.*$")'
+      tags:
+        - provision
+
+    - name: Temp default temp folder to "/var/tmp/{{ role_path | basename }}/"
+      ansible.builtin.set_fact:
+        vmproim_tempfolder: "/var/tmp/{{ role_path | basename }}/"
+      tags:
+        - provision
+
+    - name: Temp folder on MacOS or if TMPDIR variable is found
+      ansible.builtin.set_fact:
+        vmproim_tempfolder: "{{ lookup('env', 'TMPDIR') }}{{ role_path | basename }}/"
+      when: lookup('env','TMPDIR')
+      tags:
+        - provision
+
+    - name: "Create temp folder for staging of setup of vm images at {{ vmproim_tempfolder }}"
+      ansible.builtin.file:
+        path: "{{ vmproim_tempfolder }}"
+        state: directory
+        mode: 0755
+
+    - name: Info temp folder will be deleted after run
+      ansible.builtin.debug:
+        msg: "info temp folder will be deleted after run"
+      when: vmproim_delete_temp_folder == "yes"
+      changed_when: true
+      notify:
+        - delete temp folder
+
+    - name: Create cloud init folder
+      ansible.builtin.file:
+        path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}"
+        state: directory
+        mode: 0755
+      tags:
+        - provision
+
+    - name: Read this users ssh public key for cloud-init if no user has been set
+      ansible.builtin.shell: cat ~/.ssh/id_rsa.pub
+      become: no
+      register: user_ssh_public_key
+      when: vmproim_firstusersshpubkey == ""
+
+    - name: Set vmproim_firstusersshpubkey variable
+      ansible.builtin.set_fact:
+        vmproim_firstusersshpubkey: "{{ user_ssh_public_key.stdout }}"
+      when: vmproim_firstusersshpubkey == ""
+
+    - name: Read this users username (running the deploy) if no user has been set
+      ansible.builtin.command: whoami
+      become: no
+      register: username_on_the_ansible_host
+      when: vmproim_firstusername == ""
+      delegate_to: localhost
+
+    - name: Set vmproim_firstusername variable
+      ansible.builtin.set_fact:
+        vmproim_firstusername: "{{ username_on_the_ansible_host.stdout }}"
+      when: vmproim_firstusername == ""
+
+    - name: Set vmproim_firstuserpasshash variable
+      ansible.builtin.set_fact:
+        vmproim_firstuserpasshash: "sajEeYaHYyeSU"    # 12345
+      when: vmproim_firstuserpasshash == ""
+
+    - name: "Copy cloud-init user-data template for vm with initial user {{ vmproim_firstusername }}"
+      ansible.builtin.template:
+        src: user-data.txt.j2
+        dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/user-data"
+        mode: 0600
+      register: userdata_task
+
+    - name: Copy cloud-init meta-data template for vm
+      ansible.builtin.template:
+        src: meta-data.txt.j2
+        dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/meta-data"
+        mode: 0600
+      register: metadata_task
+
+    # userdata via cloud-config openstack - funktioniert leider nicht in der vm.
+    # - file:
+    #    path: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest"
+    #    state: directory
+    #    recurse: yes
+    # - name: copy cloud-init userdata openstack template for vm
+    #  template:
+    #    src: user-data.txt.j2
+    #    dest: "{{ vmproim_tempfolder }}{{ inventory_hostname }}/openstack/latest/user-data"
+    - name: Create cd image for cloud-init (with mkisofs)
+      ansible.builtin.shell: "mkisofs -output {{ cloudinit_iso }} -r -J -V cidata {{ inventory_hostname }}/"
+      args:
+        chdir: "{{ vmproim_tempfolder }}"
+      register: created_cdimage_cloudinit
+      changed_when: true
+      # shell: "hdiutil makehybrid -iso -o {{ cloudinit_iso }} {{ inventory_hostname }}/"
+      # auskommentiert: -V user-data // -V cidata
+      #   creates: "{{ cloudinit_iso }}"
+      # when: metadata_task.changed or userdata_task.changed
+      # ansible_os_family == 'Darwin'
+
+    - name: Download hdd image file for vm (can take very long!)
+      ansible.builtin.get_url:
+        url: "{{ vmproim_imagesource }}"
+        dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+        checksum: "sha256:{{ vmproim_img_sha256 }}"
+        mode: 0600
+      when: vmproim_imagesource is regex("^(http|ftp)s?.*")
+
+    - name: Copy hdd image for vm from given path
+      ansible.builtin.copy:
+        src: "{{ vmproim_imagesource }}"
+        dest: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+        mode: 0644
+      when: vmproim_imagesource is regex("^(\/)|(\~).*\/?.*")
+
+    - name: Use sha256 to calculate checksum
+      ansible.builtin.stat:
+        path: "{{ vmproim_tempfolder }}{{ vmproim_img_filename }}"
+        checksum_algorithm: sha256
+      register: vmproim_img_filename_stat
+      when: vmproim_imagesource is regex("^(\/)|(\~).*\/?.*")
+
+    - name: Fail if checksum of copied image from path does not match
+      ansible.builtin.fail:
+        msg: "Checksum of the copied image source file differs from the requested checksum!"
+      when:
+        - vmproim_img_sha256 != vmproim_img_filename_stat.stat.checksum
+        - vmproim_imagesource is regex("^(\/)|(\~).*\/?.*")
+
+    - name: Convert to vmdk (if neccessary)
+      ansible.builtin.shell: "qemu-img convert -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o subformat=streamOptimized,compat6=on -p {{ vmproim_img_filename }} {{ vmproim_vmdk }} > qemu-img-convert.log"
+      # shell: "qemu-img convert {{ vmproim_img_filename }} -f {{ vmproim_img_filename | regex_replace('(^.*\\.)(.+)$', '\\2') }} -O vmdk -o adapter_type=lsilogic -p {{ vmproim_vmdk }}"
+      args:
+        chdir: "{{ vmproim_tempfolder }}"
+        creates: "{{ vmproim_vmdk }}"
+      register: convertvmdk
+      # hint: on Mac and APFS filesystem qemu-img convert may not produce results that are usable up to now! Workaround: convert the file on an exFAT volume instead. This seems to be resolved.
+
+    - name: Copy generic ovf template to local staging directory
+      ansible.builtin.template:
+        src: ovf-template.ovf.j2
+        dest: "{{ vmproim_tempfolder }}preconverted_{{ ofvtemplate_name }}"
+        mode: 0644
+      register: ofvtemplate
+
+    - name: Convert VM including hdd image for VMWare with ofvtool
+      ansible.builtin.shell: >
+        ovftool
+        --acceptAllEulas
+        --noSSLVerify
+        --skipManifestCheck
+        --allowExtraConfig
+        --diskMode=thin
+        --overwrite
+        "preconverted_{{ ofvtemplate_name }}"
+        "{{ ofvtemplate_name }}"
+      args:
+        chdir: "{{ vmproim_tempfolder }}"
+      when: ofvtemplate.changed or convertvmdk.changed
+
+
+- name: Block of tasks to provision
+  delegate_to: localhost
+  tags:
+    - provision
+  block:
+    - name: Deploy vm to VMWare host using VMWare ovftool, power it on when finished
+      ansible.builtin.shell: >
         ovftool
         --acceptAllEulas
         --noSSLVerify
@@ -210,100 +224,99 @@
         "{{ vmproim_tempfolder }}{{ ofvtemplate_name }}"
         "vi://{{ vcenter_user | urlencode }}:{{ vcenter_pass | urlencode }}@{{ vcenter_hostname }}:443"
       register: deploy_ovf_result
+      changed_when: true
       # use --overwrite option if you want to overwrite the vm on the host,
       #       else it fails if the vm already exists
       # use --diskSize:template2,10="{{ disk * 1024 }}" in order to resize/grow the disk, but this seeems not to be needed
 
 
-  # run this whole block via:
-  delegate_to: localhost
-  tags:
-    - provision
-
-- block:
-  - name: set ip or hostname to ping
-    set_fact:
-      ping_hostname: "{% if ipv4 | ipv4 %}{{ ipv4 }}{% else %}{{ ansible_host }}{% endif %}"
-
-  - name: "Wait for the post-install SSH to become available at {{ ping_hostname }}"
-    wait_for:
-      host: '{{ ping_hostname }}'
-      port: 22
-      # state: started
-      search_regex: OpenSSH
-      timeout: 300
-
-  - name: wait for the vm to work init...
-    pause:
-      seconds: 20
-
-  - name: Wait for the host to become unavailable = finished init
-    wait_for:
-      host: '{{ ping_hostname }}'
-      port: 22
-      state: stopped
-      timeout: 300
-
-  # warten, falls der host einige Zeit zum herunterfahren benötigt
-  - name: waiting...
-    pause:
-      seconds: 10
-
-  # the following task seems to work not as advertised, and is not supported for free ESXi
-  # - name: reconfigure VM on vSphere - detach cd image
-  #   vmware_guest:
-  #     hostname: "{{ vcenter_hostname }}"
-  #     username: "{{ vcenter_user }}"
-  #     password: "{{ vcenter_pass }}"
-  #     datacenter: "{{ vmproim_datacenter }}"
-  #     validate_certs: no
-  #     name: "{{ inventory_hostname }}"
-  #     state: poweredoff
-  #     cdrom:
-  #       type: none
-
-  - name: Wait for the post-reboot SSH to become available
-    wait_for:
-      host: '{{ ping_hostname }}'
-      port: 22
-      state: started
-      timeout: 300
-      sleep: 2
-
-  # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
-
-  # via https://github.com/ansible-provisioning/ansible-provisioning/blob/master/README.md
-  ### Revoke any existing host keys for this server (should become a separate ansible module to avoid conflicts)
-  - name: Revoke any existing host keys for this server by hostname
-    command: ssh-keygen -R {{ inventory_hostname_short }}
-
-  # herausfinden der IP zum entfernen dieser aus den known_hosts
-  - command: "dig +short {{ inventory_hostname }}"
-    changed_when: false
-    register: dig_output
-
-  - set_fact:
-      looked_up_ips: "{{ dig_output.stdout_lines }}"
-
-  - debug: msg="found ip {{ item }}"
-    with_items:
-      - "{{ looked_up_ips }}"
-      - "{{ ping_hostname }}"
-
-  - name: Revoke any existing host keys for this server by ip address
-    command: "ssh-keygen -R {{ item }}"
-    with_items:
-      - "{{ looked_up_ips }}"
-      - "{{ ping_hostname }}"
-
-  - name: ensure the newly created host is an ssh known host (unsecure for MITM!!)
-    known_hosts:
-      # path: /etc/ssh/ssh_known_hosts
-      name: "{{ ping_hostname }}"
-      key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ ping_hostname }}') }}"
-
-  # run this whole block via:
+- name: Block of tasks to reconfigure SSH / hosts
   delegate_to: localhost
   become: no
   tags:
     - reconfigure
+  block:
+    - name: Set ip or hostname to ping
+      ansible.builtin.set_fact:
+        ping_hostname: "{% if ipv4 | ansible.utils.ipv4 %}{{ ipv4 }}{% else %}{{ ansible_host }}{% endif %}"
+
+    - name: "Wait for the post-install SSH to become available at {{ ping_hostname }}"
+      ansible.builtin.wait_for:
+        host: "{{ ping_hostname }}"
+        port: 22
+        # state: started
+        search_regex: OpenSSH
+        timeout: 300
+
+    - name: Wait for the vm to work init...
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Wait for the host to become unavailable = finished init
+      ansible.builtin.wait_for:
+        host: "{{ ping_hostname }}"
+        port: 22
+        state: stopped
+        timeout: 300
+
+    # warten, falls der host einige Zeit zum herunterfahren benötigt
+    - name: Waiting...
+      ansible.builtin.pause:
+        seconds: 10
+
+    # the following task seems to work not as advertised, and is not supported for free ESXi
+    # - name: reconfigure VM on vSphere - detach cd image
+    #   vmware_guest:
+    #     hostname: "{{ vcenter_hostname }}"
+    #     username: "{{ vcenter_user }}"
+    #     password: "{{ vcenter_pass }}"
+    #     datacenter: "{{ vmproim_datacenter }}"
+    #     validate_certs: no
+    #     name: "{{ inventory_hostname }}"
+    #     state: poweredoff
+    #     cdrom:
+    #       type: none
+
+    - name: Wait for the post-reboot SSH to become available
+      ansible.builtin.wait_for:
+        host: "{{ ping_hostname }}"
+        port: 22
+        state: started
+        timeout: 300
+        sleep: 2
+
+    # workaround: wait a long time because the the host will regenerate ssh keys after beeing startet up again so the first key that would be used would not be used afterwards by itself thus producing the problem of not being able to login...
+
+    # via https://github.com/ansible-provisioning/ansible-provisioning/blob/master/README.md
+
+    - name: Find out IP to remove from known_hosts
+      ansible.builtin.command: "dig +short {{ inventory_hostname }}"
+      changed_when: false
+      register: dig_output
+
+    - name: Set fact looked_up_ips
+      ansible.builtin.set_fact:
+        looked_up_ips: "{{ dig_output.stdout_lines }}"
+
+    - name: Debug output - found ips
+      ansible.builtin.debug:
+        msg: "found ip {{ item }}"
+      with_items:
+        - "{{ looked_up_ips }}"
+        - "{{ ping_hostname }}"
+
+    - name: Revoke any existing host keys for this server
+      ansible.builtin.known_hosts:
+        name: "{{ item }}"
+        state: absent
+      with_items:
+        - "{{ inventory_hostname_short }}"
+        - "{{ inventory_hostname }}"
+        - "{{ looked_up_ips }}"
+        - "{{ ping_hostname }}"
+
+    - name: Ensure the newly created host is an ssh known host (unsecure for MITM!!)
+      ansible.builtin.known_hosts:
+        # path: /etc/ssh/ssh_known_hosts
+        name: "{{ ping_hostname }}"
+        key: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ ping_hostname }}') }}"

@@ -2,24 +2,25 @@
 # check /install required tools for this role
 
 # gather facts for the host it is delegated to
-- name: run setup to gather variables
-  setup:
+- name: Run setup to gather variables
+  ansible.builtin.setup:
 
-- name: check pip tools
-  pip:
+- name: Check pip tools
+  ansible.builtin.pip:
     name:
       - pyvmomi
       - netaddr
+      - requests
 
-- name: packages
-  package:
+- name: Packages
+  ansible.builtin.package:
     state: present
     name:
       - qemu-img
   when: ansible_os_family != "Darwin"
 
-- name: packages on RedHat/CentOS/OracleLinux
-  package:
+- name: Packages on RedHat/CentOS/Almalinux/etc
+  ansible.builtin.package:
     state: present
     name:
       - genisoimage
@@ -27,16 +28,16 @@
       - bind-utils
   when: ansible_os_family == "RedHat"
 
-- name: packages on mac
-  homebrew:
+- name: Packages on mac
+  ansible.builtin.homebrew:
     state: present
     name:
       - qemu
       - cdrtools
   when: ansible_os_family == "Darwin"
 
-- name: ovftool needs to be installed
-  shell: ovftool --version
+- name: External tool ovftool needs to be installed
+  ansible.builtin.shell: ovftool --version
   register: ovftoolreg
   failed_when: "'VMware ovftool' not in ovftoolreg.stdout"
   changed_when: false
